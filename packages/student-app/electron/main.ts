@@ -3,6 +3,7 @@ import * as path from 'path';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import * as os from 'os';
 
+// Optimization: Disable hardware acceleration for better compatibility in restricted environments
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 
@@ -12,10 +13,12 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 const isDev = !app.isPackaged;
 const DEV_BASE_URL = 'http://localhost:5174';
 
+// Window references
 let loginWin: BrowserWindow | null = null;
 let dashboardWin: BrowserWindow | null = null;
 let mainWin: BrowserWindow | null = null;
 
+// Persistence: Store session data in a JSON file within the app's data directory
 const stateFile = path.join(app.getPath('userData'), 'session.json');
 
 interface Session {
@@ -25,6 +28,9 @@ interface Session {
   user: { id: string; display_name: string; classroom_id: string };
 }
 
+/**
+ * Load session from disk.
+ */
 function loadSession(): Session | null {
   try {
     if (!existsSync(stateFile)) return null;
@@ -34,6 +40,9 @@ function loadSession(): Session | null {
   }
 }
 
+/**
+ * Save session to disk.
+ */
 function saveSession(s: Session | null) {
   if (s) writeFileSync(stateFile, JSON.stringify(s), 'utf8');
 }
@@ -42,6 +51,7 @@ function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
 }
 
+// URL resolution helpers
 function getLoginURL() {
   if (isDev) return `${DEV_BASE_URL}/login`;
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'login.html')}`;
@@ -58,6 +68,9 @@ function getDashboardURL() {
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'dashboard.html')}`;
 }
 
+/**
+ * Creates the initial login window.
+ */
 function createLoginWindow() {
   if (loginWin) return loginWin.focus();
 
@@ -85,6 +98,9 @@ function createLoginWindow() {
   loginWin.on('closed', () => { loginWin = null; });
 }
 
+/**
+ * Creates the dashboard window after successful login.
+ */
 function createDashboardWindow() {
   if (dashboardWin) {
     dashboardWin.show();
@@ -118,6 +134,9 @@ function createDashboardWindow() {
   });
 }
 
+/**
+ * Creates the main application window (exam host).
+ */
 function createMainWindow() {
   if (mainWin) {
     mainWin.show();
@@ -146,23 +165,34 @@ function createMainWindow() {
   mainWin.on('closed', () => { mainWin = null; });
 }
 
+/* ---------- IPC Communication ---------- */
+
+// Handle login completion
 ipcMain.handle('login:complete', async (_, payload: Session) => {
   saveSession(payload);
   loginWin?.close();
   createDashboardWindow();
 });
+
+// Handle dashboard transition to main app
 ipcMain.handle('dashboard:ready', async () => {
   dashboardWin?.close();
   createMainWindow();
 });
+
+// Provide stored session to renderer
 ipcMain.handle('session:get', async () => loadSession());
+
+// Provide system information
 ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));
 
-// Placeholder handlers – replace with real logic when needed
+// Event handlers for real-time control (lock, exam, etc.)
 ipcMain.handle('lock:apply', async (_, msg) => console.log('lock:apply', msg));
 ipcMain.handle('lock:release', async () => console.log('lock:release'));
 ipcMain.handle('exam:open', async (_, payload) => console.log('exam:open', payload));
 ipcMain.handle('exam:close', async () => console.log('exam:close'));
+
+/* ---------- App lifecycle ---------- */
 
 app.whenReady().then(() => {
   createLoginWindow();
@@ -172,6 +202,11 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // On macOS it is common for applications and their menu bar to stay active until the user quits explicitly
   if (process.platform !== 'darwin' && !mainWin) app.quit();
 });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+
+app.on('will-quit', () => {
+  // Clean up all global shortcuts on exit
+  globalShortcut.unregisterAll();
+});
