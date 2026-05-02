@@ -47,8 +47,9 @@ function getLoginURL() {
 }
 
 function getMainAppURL() {
-  if (isDev) return `${DEV_BASE_URL}?mode=host`;
-  return `file://${path.join(__dirname, '..', 'dist-renderer', 'index.html')}?mode=host`;
+  if (isDev) return `${DEV_BASE_URL}/exam.html?mode=host`;
+
+  return `file://${path.join(__dirname, '..', 'dist-renderer', 'exam.html')}?mode=host`;
 }
 
 function createLoginWindow() {
