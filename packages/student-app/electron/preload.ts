@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('studentApi', {
 
   /* ================= GENERAL ================= */
   hostInfo: () => ipcRenderer.invoke('host:info'),
+  deviceInfo: () => ipcRenderer.invoke('device:info'),
   getSession: () => ipcRenderer.invoke('session:get'),
 
   /* ================= DASHBOARD ================= */
@@ -22,6 +23,9 @@ contextBridge.exposeInMainWorld('studentApi', {
   openExam: (payload: any) => ipcRenderer.invoke('exam:open', payload),
   closeExam: () => ipcRenderer.invoke('exam:close'),
 
+  /* ================= ACTIVITY TRACKING ================= */
+  reportActivity: (type: string, data?: any) => ipcRenderer.invoke('activity:report', { type, data }),
+
   /* ================= EVENTS ================= */
   onExamStart: (cb: (p: any) => void) => {
     const handler = (_: any, p: any) => cb(p);
@@ -34,6 +38,18 @@ contextBridge.exposeInMainWorld('studentApi', {
     ipcRenderer.on('exam:reload', handler);
     return () => ipcRenderer.removeListener('exam:reload', handler);
   },
+
+  onStudentDetected: (cb: (p: any) => void) => {
+    const handler = (_: any, p: any) => cb(p);
+    ipcRenderer.on('student:detected', handler);
+    return () => ipcRenderer.removeListener('student:detected', handler);
+  },
+
+  onStudentActivity: (cb: (p: any) => void) => {
+    const handler = (_: any, p: any) => cb(p);
+    ipcRenderer.on('student:activity', handler);
+    return () => ipcRenderer.removeListener('student:activity', handler);
+  },
 });
 
 /* ================= TYPES ================= */
@@ -42,14 +58,18 @@ declare global {
     studentApi: {
       loginComplete: (p: any) => Promise<void>;
       hostInfo: () => Promise<{ hostname: string; platform: string }>;
+      deviceInfo: () => Promise<any>;
       getSession: () => Promise<any>;
       dashboardReady: () => Promise<void>;
       applyLock: (msg: string) => Promise<void>;
       releaseLock: () => Promise<void>;
       openExam: (p: any) => Promise<void>;
       closeExam: () => Promise<void>;
+      reportActivity: (type: string, data?: any) => Promise<void>;
       onExamStart: (cb: (p: any) => void) => () => void;
       onExamReload: (cb: (p: any) => void) => () => void;
+      onStudentDetected: (cb: (p: any) => void) => () => void;
+      onStudentActivity: (cb: (p: any) => void) => () => void;
     };
   }
 }

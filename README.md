@@ -133,4 +133,3 @@ $env:ELECTRON_USER_DATA="$PWD\.userdata\student2"; npm run dev:student
 ## License
 
 MIT — internal scaffold; review before redistributing.
-

@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import type { Server, Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { PresenceService } from './presence.service';
+import { StudentDetectionService } from './student-detection.service';
 import { SessionsService, StartedSession } from '../sessions/sessions.service';
 import { AttemptsService } from '../sessions/attempts.service';
 import type { JwtClaims, UserRole } from '@classroom/shared';
@@ -35,11 +36,14 @@ export class ControlGateway
   constructor(
     private readonly auth: AuthService,
     private readonly presence: PresenceService,
+    private readonly detection: StudentDetectionService,
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
   ) {}
 
   /* ---------- Connection lifecycle ---------- */
+
+  private static readonly PRESENCE_REFRESH_INTERVAL = 10_000;
 
   async handleConnection(socket: Socket): Promise<void> {
     try {
@@ -48,13 +52,46 @@ export class ControlGateway
         this.extractBearer(socket.handshake.headers.authorization);
       if (!token) throw new Error('missing_token');
       const claims = await this.auth.verifyAccessToken(token);
-      (socket.data as { user: SocketUser }).user = claims;
+      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).user = claims;
 
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
 
       await this.presence.markOnline(claims.sub);
+      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).presenceRefresh = setInterval(
+        () => this.presence.refresh(claims.sub).catch((err) =>
+          this.log.error(`Failed to refresh presence for ${claims.sub}: ${(err as Error).message}`),
+        ),
+        ControlGateway.PRESENCE_REFRESH_INTERVAL,
+      );
+
       if (claims.role === 'STUDENT') {
+        // 🔹 Auto-detect student on connection
+        const deviceInfo = {
+          hostname: (socket.handshake.headers['x-device-hostname'] as string) || 'unknown',
+          platform: (socket.handshake.headers['x-device-platform'] as string) || 'unknown',
+          ip_address: socket.handshake.address,
+          user_agent: socket.handshake.headers['user-agent'],
+        };
+
+        await this.detection.recordStudentLogin(claims.sub, claims.classroom_id, deviceInfo, {
+          username: claims.username,
+          display_name: claims.username,
+        });
+
+        // Broadcast student detection to classroom
+        const stats = await this.detection.getClassroomStats(claims.classroom_id);
+        this.io
+          .to(`classroom:${claims.classroom_id}`)
+          .emit('student:detected', {
+            student_id: claims.sub,
+            username: claims.username,
+            device: deviceInfo,
+            detected_at: new Date().toISOString(),
+            classroom_stats: stats,
+          });
+
+        // Legacy presence update
         this.io
           .to(`classroom:${claims.classroom_id}`)
           .emit('presence:update', {
@@ -71,10 +108,28 @@ export class ControlGateway
   }
 
   async handleDisconnect(socket: Socket): Promise<void> {
-    const user = (socket.data as { user?: SocketUser }).user;
+    const data = socket.data as { user?: SocketUser; presenceRefresh?: NodeJS.Timeout };
+    if (data.presenceRefresh) {
+      clearInterval(data.presenceRefresh);
+    }
+    const user = data.user;
     if (!user) return;
     await this.presence.markOffline(user.sub);
+
     if (user.role === 'STUDENT') {
+      // 🔹 Record student logout and removal from detection
+      await this.detection.recordStudentLogout(user.sub);
+
+      // Broadcast student disconnection
+      const stats = await this.detection.getClassroomStats(user.classroom_id);
+      this.io.to(`classroom:${user.classroom_id}`).emit('student:disconnected', {
+        student_id: user.sub,
+        username: user.username,
+        disconnected_at: new Date().toISOString(),
+        classroom_stats: stats,
+      });
+
+      // Legacy presence update
       this.io.to(`classroom:${user.classroom_id}`).emit('presence:update', {
         user_id: user.sub,
         online: false,
@@ -219,6 +274,43 @@ export class ControlGateway
       ...body,
     });
     return { ok: true };
+  }
+
+  /* ---------- Student Activity Tracking ---------- */
+
+  @SubscribeMessage('student:activity')
+  async handleStudentActivity(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() body: { type: string; data?: Record<string, any> },
+  ) {
+    this.requireRole(socket, 'STUDENT');
+    const u = this.userOf(socket);
+    
+    // Update student activity in detection service
+    await this.detection.updateStudentActivity(u.sub, body.type);
+
+    // Emit activity event to tutors in classroom
+    this.io.to(`tutor:${u.classroom_id}`).emit('student:activity', {
+      student_id: u.sub,
+      username: u.username,
+      activity_type: body.type,
+      timestamp: new Date().toISOString(),
+      data: body.data,
+    });
+
+    return { ok: true };
+  }
+
+  @SubscribeMessage('student:get-detected')
+  async handleGetDetectedStudents(@ConnectedSocket() socket: Socket) {
+    const u = this.userOf(socket);
+    if (u.role !== 'TUTOR') {
+      throw new Error('forbidden:tutor_only');
+    }
+
+    // Get all detected students in classroom
+    const stats = await this.detection.getClassroomStats(u.classroom_id);
+    return { ok: true, ...stats };
   }
 
   /* ---------- External fan-out helpers (called from controllers/scheduler) ---------- */

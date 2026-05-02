@@ -1,32 +1,32 @@
 {
-  "name": "classroom-control",
-  "private": true,
+  "name": "@classroom/tutor-app",
   "version": "1.0.0",
-  "description": "NetSupport-style classroom management: backend + tutor/student/designer Electron apps",
-  "workspaces": [
-    "packages/shared",
-    "packages/backend",
-    "packages/tutor-app",
-    "packages/student-app",
-    "packages/designer-app"
-  ],
+  "private": true,
+  "main": "dist-electron/main.js",
   "scripts": {
-    "dev:backend": "npm -w @classroom/backend run start:dev",
-    "dev:tutor": "npm -w @classroom/tutor-app run dev",
-    "dev:student": "npm -w @classroom/student-app run dev",
-    "dev:designer": "npm -w @classroom/designer-app run dev",
-    "build": "npm -ws run build",
-    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "db:migrate": "npm -w @classroom/backend run db:migrate",
-    "db:seed": "npm -w @classroom/backend run db:seed"
+    "dev": "concurrently -k \"npm:dev:vite\" \"npm:dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && electron .",
+    "build": "tsc -p electron/tsconfig.json && vite build",
+    "start": "electron ."
   },
-  "engines": {
-    "node": ">=20.10.0"
+  "dependencies": {
+    "@classroom/shared": "1.0.0",
+    "@nestjs/core": "11.1.19",
+    "axios": "^1.6.8",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.7.5",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@vitejs/plugin-react": "^4.2.1",
     "concurrently": "^8.2.2",
+    "electron": "^41.3.0",
     "typescript": "^5.4.5",
-    "vite": "^7.3.2"
+    "vite": "^8.0.10",
+    "wait-on": "^7.2.0"
   }
 }

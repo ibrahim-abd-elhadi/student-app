@@ -1,177 +1,200 @@
-import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
-import * as path from 'path';
-import { writeFileSync, readFileSync, existsSync } from 'fs';
-import * as os from 'os';
+/// <reference types="node" />
+import { app, BrowserWindow, Tray, Menu, ipcMain, IpcMainInvokeEvent } from "electron";
+import * as path from "path";
+import * as os from "os";
 
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('disable-gpu');
+// 🔹 Global type declarations for CommonJS globals
+declare global {
+  var __dirname: string;
+  var __filename: string;
+}
 
-// Hide security warnings in development (remove for production)
-process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
+let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 
-const isDev = !app.isPackaged;
-const DEV_BASE_URL = 'http://localhost:5174';
-
-let loginWin: BrowserWindow | null = null;
-let dashboardWin: BrowserWindow | null = null;
-let mainWin: BrowserWindow | null = null;
-
-const stateFile = path.join(app.getPath('userData'), 'session.json');
-
+// 🔹 Session storage
 interface Session {
   base_url: string;
   access_token: string;
   refresh_token: string;
-  user: { id: string; display_name: string; classroom_id: string };
+  user: {
+    id: string;
+    display_name: string;
+    classroom_id: string;
+  };
+}
+let currentSession: Session | null = null;
+
+// 🔹 Create hidden window
+function createWindow() {
+// In CommonJS, __dirname is automatically available
+const preloadScript = path.join(__dirname, "preload.js");
+
+mainWindow = new BrowserWindow({
+width: 1000,
+height: 700,
+show: false, // 🔥 start hidden
+webPreferences: {
+nodeIntegration: false, // ✅ Security: disable direct Node access
+contextIsolation: true, // ✅ Security: enable context isolation
+preload: preloadScript, // ✅ Use preload script
+},
+});
+
+mainWindow.webContents.on("devtools-opened", () => {
+  mainWindow?.webContents.closeDevTools();
+});
+
+mainWindow.loadURL("http://localhost:5174/login"); // ✅ Correct port from vite.config.ts
+
+// 🔹 Prevent closing
+mainWindow.on("close", (event: any) => {
+event.preventDefault();
+mainWindow?.hide();
+});
 }
 
-function loadSession(): Session | null {
-  try {
-    if (!existsSync(stateFile)) return null;
-    return JSON.parse(readFileSync(stateFile, 'utf8'));
-  } catch {
-    return null;
+// 🔹 Create system tray
+function createTray() {
+// Use a fallback icon path - in production this should exist in dist-electron/
+const iconPath = path.join(__dirname, "icon.png");
+tray = new Tray(iconPath);
+
+const contextMenu = Menu.buildFromTemplate([
+{
+label: "Open",
+click: () => mainWindow?.show(),
+},
+{
+label: "Quit",
+click: () => {
+// Allow app to quit when user explicitly requests it
+app.exit(0);
+},
+},
+]);
+
+tray.setToolTip("Student App Running");
+tray.setContextMenu(contextMenu);
+
+tray.on("double-click", () => {
+mainWindow?.show();
+});
+}
+
+// 🔹 App ready
+app.whenReady().then(async () => {
+createWindow();
+createTray();
+});
+
+// 🔹 Prevent multiple instances
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+app.quit();
+} else {
+app.on("second-instance", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
   }
-}
-
-function saveSession(s: Session | null) {
-  if (s) writeFileSync(stateFile, JSON.stringify(s), 'utf8');
-}
-
-function getPreloadPath() {
-  return path.join(__dirname, 'preload.js');
-}
-
-function getLoginURL() {
-  if (isDev) return `${DEV_BASE_URL}/login`;
-  return `file://${path.join(__dirname, '..', 'dist-renderer', 'login.html')}`;
-}
-
-function getMainAppURL() {
-  if (isDev) return `${DEV_BASE_URL}/exam.html?mode=host`;
-
-  return `file://${path.join(__dirname, '..', 'dist-renderer', 'exam.html')}?mode=host`;
-}
-
-function getDashboardURL() {
-  if (isDev) return `${DEV_BASE_URL}/dashboard.html`;
-  return `file://${path.join(__dirname, '..', 'dist-renderer', 'dashboard.html')}`;
-}
-
-function createLoginWindow() {
-  if (loginWin) return loginWin.focus();
-
-  loginWin = new BrowserWindow({
-    width: 420,
-    height: 540,
-    title: 'Student Login',
-    resizable: false,
-    show: false,
-    webPreferences: {
-      preload: getPreloadPath(),
-      contextIsolation: true,
-      sandbox: false,
-    },
-  });
-
-  loginWin.once('ready-to-show', () => {
-    loginWin?.show();
-    loginWin?.focus();
-  });
-
-  if (isDev) loginWin.webContents.openDevTools();
-
-  loginWin.loadURL(getLoginURL()).catch(err => console.error('Login load error:', err));
-  loginWin.on('closed', () => { loginWin = null; });
-}
-
-function createDashboardWindow() {
-  if (dashboardWin) {
-    dashboardWin.show();
-    dashboardWin.focus();
-    return;
-  }
-  dashboardWin = new BrowserWindow({
-    width: 960,
-    height: 720,
-    title: 'Student Dashboard',
-    show: false,
-    webPreferences: {
-      preload: getPreloadPath(),
-      contextIsolation: true,
-      sandbox: false,
-    },
-  });
-
-  dashboardWin.once('ready-to-show', () => {
-    dashboardWin?.show();
-    dashboardWin?.focus();
-  });
-
-  if (isDev) dashboardWin.webContents.openDevTools();
-
-  dashboardWin
-    .loadURL(getDashboardURL())
-    .catch((err) => console.error('Dashboard load error:', err));
-  dashboardWin.on('closed', () => {
-    dashboardWin = null;
-  });
-}
-
-function createMainWindow() {
-  if (mainWin) {
-    mainWin.show();
-    mainWin.focus();
-    return;
-  }
-
-  mainWin = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    show: true,
-    webPreferences: {
-      preload: getPreloadPath(),
-      contextIsolation: true,
-      sandbox: false,
-    },
-  });
-
-  if (isDev) mainWin.webContents.openDevTools();
-
-  mainWin.webContents.on('did-fail-load', (_, errorCode, errorDesc) => {
-    console.error(`Main window failed: ${errorDesc} (${errorCode})`);
-  });
-
-  mainWin.loadURL(getMainAppURL()).catch(err => console.error('Main window load error:', err));
-  mainWin.on('closed', () => { mainWin = null; });
-}
-
-ipcMain.handle('login:complete', async (_, payload: Session) => {
-  saveSession(payload);
-  loginWin?.close();
-  createDashboardWindow();
 });
-ipcMain.handle('dashboard:ready', async () => {
-  dashboardWin?.close();
-  createMainWindow();
-});
-ipcMain.handle('session:get', async () => loadSession());
-ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));
+}
 
-// Placeholder handlers – replace with real logic when needed
-ipcMain.handle('lock:apply', async (_, msg) => console.log('lock:apply', msg));
-ipcMain.handle('lock:release', async () => console.log('lock:release'));
-ipcMain.handle('exam:open', async (_, payload) => console.log('exam:open', payload));
-ipcMain.handle('exam:close', async () => console.log('exam:close'));
-
-app.whenReady().then(() => {
-  createLoginWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createLoginWindow();
-  });
+// 🔹 Prevent quitting completely when all windows closed
+app.on("window-all-closed", (e: any) => {
+e.preventDefault();
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin' && !mainWin) app.quit();
+// 🔹 IPC Handlers for lock mode
+ipcMain.on("LOCK_APP", () => {
+if (mainWindow) {
+mainWindow.setFullScreen(true);
+mainWindow.setAlwaysOnTop(true);
+mainWindow.show();
+}
 });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+
+ipcMain.on("UNLOCK_APP", () => {
+if (mainWindow) {
+mainWindow.setFullScreen(false);
+mainWindow.setAlwaysOnTop(false);
+}
+});
+
+// 🔹 IPC Handlers for Preload Bridge
+ipcMain.handle("login:complete", async (event: IpcMainInvokeEvent, payload: Session) => {
+currentSession = payload;
+// In host mode, load the login page with ?mode=host query
+if (mainWindow) {
+mainWindow.loadURL(`http://localhost:5174/login?mode=host`);
+}
+});
+
+ipcMain.handle("host:info", async (event: IpcMainInvokeEvent) => {
+return {
+hostname: os.hostname(),
+platform: process.platform,
+};
+});
+
+ipcMain.handle("session:get", async (event: IpcMainInvokeEvent) => {
+return currentSession;
+});
+
+ipcMain.handle("dashboard:ready", async (event: IpcMainInvokeEvent) => {
+// Called when dashboard is ready
+console.log("[IPC] Dashboard ready");
+});
+
+ipcMain.handle("lock:apply", async (event: IpcMainInvokeEvent, message: string) => {
+if (mainWindow) {
+mainWindow.setFullScreen(true);
+mainWindow.setAlwaysOnTop(true);
+mainWindow.webContents.send("lock:applied", { message });
+mainWindow.show();
+}
+});
+
+ipcMain.handle("lock:release", async (event: IpcMainInvokeEvent) => {
+if (mainWindow) {
+mainWindow.setFullScreen(false);
+mainWindow.setAlwaysOnTop(false);
+mainWindow.webContents.send("lock:released");
+}
+});
+
+ipcMain.handle("exam:open", async (event: IpcMainInvokeEvent, payload: any) => {
+if (mainWindow) {
+mainWindow.loadURL(`http://localhost:5174/exam?id=${payload.id}`);
+mainWindow.webContents.send("exam:started", payload);
+}
+});
+
+ipcMain.handle("exam:close", async (event: IpcMainInvokeEvent) => {
+if (mainWindow) {
+mainWindow.loadURL(`http://localhost:5174/dashboard`);
+mainWindow.webContents.send("exam:closed");
+}
+});
+
+// 🔹 IPC Handler for Device Detection
+ipcMain.handle("device:info", async (event: IpcMainInvokeEvent) => {
+return {
+hostname: os.hostname(),
+platform: process.platform,
+arch: process.arch,
+type: os.type(),
+uptime: os.uptime(),
+total_memory: os.totalmem(),
+free_memory: os.freemem(),
+cpu_count: os.cpus().length,
+};
+});
+
+// 🔹 IPC Handler for Activity Reporting
+ipcMain.handle("activity:report", async (event: IpcMainInvokeEvent, payload: { type: string; data?: any }) => {
+console.log(`[Activity] ${payload.type}`, payload.data);
+// Can be extended to log activities to a file or send to backend
+return { ok: true, received_at: new Date().toISOString() };
+});
