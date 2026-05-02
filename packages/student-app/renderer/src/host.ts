@@ -12,7 +12,8 @@ export async function startHost() {
   const session = await window.studentApi.getSession();
   if (!session) return;
 
-  socket = io(`${session.base_url}/ws`, {
+  socket = io(session.base_url, {
+    namespace: '/ws',
     transports: ['websocket'],
     auth: { token: session.access_token },
     reconnection: true,
@@ -27,6 +28,10 @@ export async function startHost() {
   socket.on('disconnect', (r) => {
     // eslint-disable-next-line no-console
     console.warn('[host] disconnected', r);
+  });
+  socket.on('connect_error', (err) => {
+    // eslint-disable-next-line no-console
+    console.error('[host] connect_error', err);
   });
 
   socket.on('lock:apply', async (p: { message?: string }) => {

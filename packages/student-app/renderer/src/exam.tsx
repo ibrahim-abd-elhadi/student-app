@@ -92,7 +92,8 @@ function ExamApp() {
     (async () => {
       const session = await window.studentApi.getSession();
       if (!session || cancelled) return;
-      s = io(`${session.base_url}/ws`, {
+      s = io(session.base_url, {
+        namespace: '/ws',
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,
@@ -118,6 +119,9 @@ function ExamApp() {
         }
       });
       s.on('disconnect', () => setConnected(false));
+      s.on('connect_error', (err) => {
+        console.error('[student exam] socket connect_error', err);
+      });
       s.on('exam:closed', () => {
         clearPersisted();
         setSubmitted(true);

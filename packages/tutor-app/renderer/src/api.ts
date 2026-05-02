@@ -103,13 +103,17 @@ export class ApiClient {
     const s = this.session;
     if (!s) throw new Error('no_session');
     if (this.socket?.connected) return this.socket;
-    this.socket = io(`${this.baseUrl}/ws`, {
+    this.socket = io(this.baseUrl, {
+      namespace: '/ws',
       transports: ['websocket'],
       auth: { token: s.access_token },
       reconnection: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 5_000,
     });
+    this.socket.on('connect', () => console.debug('[tutor] socket connected'));
+    this.socket.on('disconnect', (reason) => console.warn('[tutor] socket disconnected', reason));
+    this.socket.on('connect_error', (err) => console.error('[tutor] socket connect_error', err));
     return this.socket;
   }
 }

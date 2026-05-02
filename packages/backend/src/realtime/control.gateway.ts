@@ -13,6 +13,7 @@ import { AuthService } from '../auth/auth.service';
 import { PresenceService } from './presence.service';
 import { SessionsService, StartedSession } from '../sessions/sessions.service';
 import { AttemptsService } from '../sessions/attempts.service';
+import { UsersService } from '../users/users.service';
 import type { JwtClaims, UserRole } from '@classroom/shared';
 
 interface SocketUser extends JwtClaims {}
@@ -28,6 +29,7 @@ export class ControlGateway
   implements OnGatewayConnection, OnGatewayDisconnect
 {
   private readonly log = new Logger('ControlGateway');
+  private readonly activeSockets = new Map<string, number>();
 
   @WebSocketServer()
   io!: Server;
@@ -37,6 +39,7 @@ export class ControlGateway
     private readonly presence: PresenceService,
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
+    private readonly usersService: UsersService,
   ) {}
 
   /* ---------- Connection lifecycle ---------- */
@@ -55,6 +58,8 @@ export class ControlGateway
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
 
+      const active = (this.activeSockets.get(claims.sub) ?? 0) + 1;
+      this.activeSockets.set(claims.sub, active);
       await this.presence.markOnline(claims.sub);
       (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).presenceRefresh = setInterval(
         () => this.presence.refresh(claims.sub).catch((err) =>
@@ -63,7 +68,19 @@ export class ControlGateway
         ControlGateway.PRESENCE_REFRESH_INTERVAL,
       );
 
-      if (claims.role === 'STUDENT') {
+      if (claims.role === 'TUTOR' || claims.role === 'ADMIN') {
+        const roster = await this.usersService.listClassroomStudents(claims.classroom_id);
+        socket.emit(
+          'presence:sync',
+          roster.map((student) => ({
+            user_id: student.id,
+            online: student.online,
+            last_seen_at: student.last_seen_at,
+          })),
+        );
+      }
+
+      if (claims.role === 'STUDENT' && active === 1) {
         this.io
           .to(`classroom:${claims.classroom_id}`)
           .emit('presence:update', {
@@ -86,6 +103,15 @@ export class ControlGateway
     }
     const user = data.user;
     if (!user) return;
+
+    const active = (this.activeSockets.get(user.sub) ?? 1) - 1;
+    if (active > 0) {
+      this.activeSockets.set(user.sub, active);
+      this.log.log(`Disconnected socket for ${user.username}, still ${active} active`);
+      return;
+    }
+
+    this.activeSockets.delete(user.sub);
     await this.presence.markOffline(user.sub);
     if (user.role === 'STUDENT') {
       this.io.to(`classroom:${user.classroom_id}`).emit('presence:update', {

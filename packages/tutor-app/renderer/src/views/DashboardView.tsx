@@ -15,11 +15,31 @@ export function DashboardView() {
   const setView = useApp((s) => s.setView);
 
   useEffect(() => {
-    void api.listStudents(user.classroom_id).then(setRoster);
+    const pendingPresence = new Map<string, { online: boolean; last_seen_at: string | null }>();
+
+    const applyPresence = (id: string, online: boolean, last_seen_at: string | null) => {
+      pendingPresence.set(id, { online, last_seen_at });
+      upsertPresence(id, online, last_seen_at);
+    };
+
+    void api.listStudents(user.classroom_id).then((roster) =>
+      setRoster(
+        roster.map((student) => {
+          const p = pendingPresence.get(student.id);
+          return p ? { ...student, ...p } : student;
+        }),
+      ),
+    );
+
     const sock = api.connectSocket();
     sock.on('presence:update', (p: any) =>
-      upsertPresence(p.user_id, p.online, p.last_seen_at),
+      applyPresence(p.user_id, p.online, p.last_seen_at),
     );
+    sock.on('presence:sync', (entries: any[]) => {
+      for (const p of entries) {
+        applyPresence(p.user_id, p.online, p.last_seen_at);
+      }
+    });
     sock.on('student:state', (p: any) =>
       upsertStudentState(p.student_id, {
         locked: p.locked,
@@ -28,6 +48,7 @@ export function DashboardView() {
     );
     return () => {
       sock.off('presence:update');
+      sock.off('presence:sync');
       sock.off('student:state');
     };
   }, [user.classroom_id, setRoster, upsertPresence, upsertStudentState]);
