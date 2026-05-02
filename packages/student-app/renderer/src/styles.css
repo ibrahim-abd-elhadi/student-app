@@ -346,13 +346,21 @@ h2 { margin: 0 0 16px 0; font-weight: 700; letter-spacing: -0.02em; }
   font-weight: 500;
 }
 
-.dash-table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.dash-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .dash-table th, .dash-table td {
   text-align: right;
   padding: 12px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.dash-table th:nth-child(1), .dash-table td:nth-child(1) { width: 36%; }
+.dash-table th:nth-child(2), .dash-table td:nth-child(2) { width: 24%; }
+.dash-table th:nth-child(3), .dash-table td:nth-child(3) { width: 12%; }
+.dash-table th:nth-child(4), .dash-table td:nth-child(4) { width: 14%; }
+.dash-table th:nth-child(5), .dash-table td:nth-child(5) { width: 14%; }
 .dash-table th {
   color: var(--text-muted);
   font-weight: 500;
