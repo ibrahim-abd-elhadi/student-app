@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "../../", 
+    "baseUrl": "src",
+    "paths": {
+      "@classroom/shared": ["../../shared/src"],
+      "@classroom/shared/*": ["../../shared/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../shared/src/**/*.ts"
+  ]
+}
