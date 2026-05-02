@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Attempt, Exam, Question, Session, User } from '../entities';
 import { SessionsController } from './sessions.controller';
+import { MeController } from './me.controller';
 import { SessionsService } from './sessions.service';
 import { AttemptsService } from './attempts.service';
 import { SessionsScheduler } from './sessions.scheduler';
@@ -14,7 +15,7 @@ import { RealtimeModule } from '../realtime/realtime.module';
     ExamsModule,
     forwardRef(() => RealtimeModule),
   ],
-  controllers: [SessionsController],
+  controllers: [SessionsController, MeController],
   providers: [SessionsService, AttemptsService, SessionsScheduler],
   exports: [SessionsService, AttemptsService],
 })

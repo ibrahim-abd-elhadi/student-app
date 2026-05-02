@@ -73,3 +73,31 @@ input, select {
   background: #b45309; color: white; padding: 6px 12px; border-radius: 6px;
   font-size: 12px;
 }
+
+/* Dashboard */
+.dash { padding: 32px; max-width: 960px; margin: 0 auto; }
+.dash-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.dash-header h1 { margin: 0 0 4px 0; font-size: 22px; }
+.stats {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 12px; margin-bottom: 16px;
+}
+.stat {
+  background: #1e293b; border: 1px solid #334155;
+  border-radius: 8px; padding: 16px; text-align: center;
+}
+.stat-value {
+  font-size: 28px; font-weight: 600; color: #e2e8f0;
+  font-variant-numeric: tabular-nums;
+}
+.stat-label { color: #94a3b8; font-size: 13px; margin-top: 4px; }
+.dash-table { width: 100%; border-collapse: collapse; }
+.dash-table th, .dash-table td {
+  text-align: right; padding: 10px 8px;
+  border-bottom: 1px solid #334155; font-size: 14px;
+}
+.dash-table th { color: #94a3b8; font-weight: 500; }
+.dash-table tbody tr:last-child td { border-bottom: none; }

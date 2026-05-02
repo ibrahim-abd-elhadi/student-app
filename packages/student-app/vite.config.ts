@@ -14,6 +14,7 @@ export default defineConfig({
         login: path.resolve(__dirname, 'renderer/login.html'),
         lock: path.resolve(__dirname, 'renderer/lock.html'),
         exam: path.resolve(__dirname, 'renderer/exam.html'),
+        dashboard: path.resolve(__dirname, 'renderer/dashboard.html'),
       },
     },
   },

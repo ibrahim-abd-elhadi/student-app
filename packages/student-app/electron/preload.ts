@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('studentApi', {
   hostInfo: () => ipcRenderer.invoke('host:info'),
   getSession: () => ipcRenderer.invoke('session:get'),
 
+  /* ================= DASHBOARD ================= */
+  dashboardReady: () => ipcRenderer.invoke('dashboard:ready'),
+
   /* ================= LOCK ================= */
   applyLock: (msg: string) => ipcRenderer.invoke('lock:apply', msg),
   releaseLock: () => ipcRenderer.invoke('lock:release'),
@@ -40,6 +43,7 @@ declare global {
       loginComplete: (p: any) => Promise<void>;
       hostInfo: () => Promise<{ hostname: string; platform: string }>;
       getSession: () => Promise<any>;
+      dashboardReady: () => Promise<void>;
       applyLock: (msg: string) => Promise<void>;
       releaseLock: () => Promise<void>;
       openExam: (p: any) => Promise<void>;
