@@ -1,0 +1,11 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "ignoreDeprecations": "6.0",
+    "outDir": "../dist-electron",
+    "rootDir": ".",
+    "module": "commonjs",
+    "target": "ES2022"
+  },
+  "include": ["./**/*.ts"]
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"],
+    "paths": {
+      "@classroom/shared": ["../../shared/src"]
+    },
+    "baseUrl": "."
+  },
+  "include": ["src/**/*"]
+}
