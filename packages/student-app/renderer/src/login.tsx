@@ -7,7 +7,7 @@ import './styles.css';
 const isHost = new URLSearchParams(location.search).get('mode') === 'host';
 
 function LoginCard() {
-  const [base, setBase] = useState('http://127.0.0.1:3000');
+  const [base, setBase] = useState('http://127.0.0.1:8080');
   const [username, setUsername] = useState('student1');
   const [password, setPassword] = useState('Password123!');
   const [busy, setBusy] = useState(false);

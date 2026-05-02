@@ -2,15 +2,19 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "../../", 
-    "baseUrl": "src",
+
+    "rootDir": "..",
+
+    "baseUrl": ".",
+
     "paths": {
-      "@classroom/shared": ["../../shared/src"],
-      "@classroom/shared/*": ["../../shared/src/*"]
+      "@classroom/shared": ["../shared/src"],
+      "@classroom/shared/*": ["../shared/src/*"]
     }
   },
   "include": [
     "src/**/*.ts",
-    "../../shared/src/**/*.ts"
-  ]
+    "../shared/src/**/*.ts"
+  ],
+  "exclude": ["dist", "node_modules"]
 }

@@ -1,11 +1,15 @@
 {
-  "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "ignoreDeprecations": "6.0",
-    "outDir": "../dist-electron",
-    "rootDir": ".",
+    "target": "ES2022",
     "module": "commonjs",
-    "target": "ES2022"
-  },
-  "include": ["./**/*.ts"]
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
 }
