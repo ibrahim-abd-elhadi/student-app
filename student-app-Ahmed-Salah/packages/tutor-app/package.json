@@ -1,0 +1,32 @@
+{
+  "name": "@classroom/tutor-app",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:vite\" \"npm:dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "wait-on tcp:5173 && tsc -p electron/tsconfig.json && electron .",
+    "build": "tsc -p electron/tsconfig.json && vite build",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@classroom/shared": "1.0.0",
+    "@nestjs/core": "11.1.19",
+    "axios": "^1.6.8",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.7.5",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^41.3.0",
+    "typescript": "^5.4.5",
+    "vite": "^8.0.10",
+    "wait-on": "^7.2.0"
+  }
+}
