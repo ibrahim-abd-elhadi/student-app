@@ -3,11 +3,7 @@
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Arabic Summary / ملخص بالعربية**
-> نظام متكامل لإدارة الفصول الدراسية (مثل NetSupport) يتيح للمعلم التحكم في أجهزة الطلاب، إجراء الاختبارات، ومراقبة الأداء في الوقت الفعلي.
-> يتكون المشروع من backend (NestJS) و تطبيقات سطح مكتب (Electron + React) لكل من المعلم والطالب ومصمم الاختبارات.
-
-Production-grade scaffold of a tutor / student / exam-designer system. Built for speed, security, and real-time interaction.
+Production-grade scaffold of a tutor / student / exam-designer system. Built for speed, security, and real-time interaction. It allows teachers to control student devices, conduct exams, and monitor performance in real-time.
 
 ---
 
@@ -17,7 +13,7 @@ This project is organized as a **Monorepo** using npm workspaces:
 
 - **`packages/shared/`**: Single source of truth for TypeScript types, REST contracts, and WebSocket event signatures.
 - **`packages/backend/`**: NestJS API + Socket.IO gateway. Handles business logic, persistence, and real-time fan-out.
-- **`packages/tutor-app/`**: Electron controller for the teacher. Features RTL Arabic UI and student monitoring.
+- **`packages/tutor-app/`**: Electron controller for the teacher. Features student monitoring and classroom control.
 - **`packages/student-app/`**: Electron client with a hidden host window, fullscreen lock overlay, and kiosk-mode exam runner.
 - **`packages/designer-app/`**: Electron-based MCQ authoring tool for creating and managing exams.
 - **`infra/`**: Docker Compose configurations for PostgreSQL and Redis.
