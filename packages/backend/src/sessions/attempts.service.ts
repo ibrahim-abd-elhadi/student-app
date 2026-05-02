@@ -8,7 +8,6 @@ import { DataSource, Repository } from 'typeorm';
 import { Attempt, Question, Session } from '../entities';
 import { SessionsService } from './sessions.service';
 import { AuditService } from '../common/audit.service';
-import type { StudentAttemptSummary } from '@classroom/shared';
 
 export interface UpsertAnswerInput {
   student_id: string;
@@ -134,44 +133,6 @@ export class AttemptsService {
 
       return { score: attempt.score };
     });
-  }
-
-  async listForStudent(studentId: string): Promise<StudentAttemptSummary[]> {
-    const rows = await this.attempts.find({
-      where: { student_id: studentId },
-      relations: { session: { exam: true } },
-    });
-    if (rows.length === 0) return [];
-    rows.sort(
-      (a, b) =>
-        b.session.created_at.getTime() - a.session.created_at.getTime(),
-    );
-
-    const examIds = [...new Set(rows.map((r) => r.session.exam_id))];
-    const totals = await this.questions
-      .createQueryBuilder('q')
-      .select('q.exam_id', 'exam_id')
-      .addSelect('SUM(q.points)::int', 'total')
-      .where('q.exam_id IN (:...ids)', { ids: examIds })
-      .groupBy('q.exam_id')
-      .getRawMany<{ exam_id: string; total: number }>();
-    const totalByExam = new Map(totals.map((t) => [t.exam_id, t.total]));
-
-    return rows.map((a) => ({
-      attempt_id: a.id,
-      session_id: a.session_id,
-      exam_id: a.session.exam_id,
-      exam_title: a.session.exam.title,
-      state: a.state,
-      session_state: a.session.state,
-      score: a.score,
-      total_points: totalByExam.get(a.session.exam_id) ?? null,
-      answered_count: a.answered_count,
-      started_at: a.started_at?.toISOString() ?? null,
-      submitted_at: a.submitted_at?.toISOString() ?? null,
-      deadline_at: a.session.deadline_at?.toISOString() ?? null,
-      created_at: a.session.created_at.toISOString(),
-    }));
   }
 
   async resync(studentId: string, sessionId: string) {

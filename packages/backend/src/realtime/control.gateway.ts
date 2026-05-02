@@ -41,6 +41,8 @@ export class ControlGateway
 
   /* ---------- Connection lifecycle ---------- */
 
+  private static readonly PRESENCE_REFRESH_INTERVAL = 10_000;
+
   async handleConnection(socket: Socket): Promise<void> {
     try {
       const token =
@@ -48,12 +50,19 @@ export class ControlGateway
         this.extractBearer(socket.handshake.headers.authorization);
       if (!token) throw new Error('missing_token');
       const claims = await this.auth.verifyAccessToken(token);
-      (socket.data as { user: SocketUser }).user = claims;
+      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).user = claims;
 
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
 
       await this.presence.markOnline(claims.sub);
+      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).presenceRefresh = setInterval(
+        () => this.presence.refresh(claims.sub).catch((err) =>
+          this.log.error(`Failed to refresh presence for ${claims.sub}: ${(err as Error).message}`),
+        ),
+        ControlGateway.PRESENCE_REFRESH_INTERVAL,
+      );
+
       if (claims.role === 'STUDENT') {
         this.io
           .to(`classroom:${claims.classroom_id}`)
@@ -71,7 +80,11 @@ export class ControlGateway
   }
 
   async handleDisconnect(socket: Socket): Promise<void> {
-    const user = (socket.data as { user?: SocketUser }).user;
+    const data = socket.data as { user?: SocketUser; presenceRefresh?: NodeJS.Timeout };
+    if (data.presenceRefresh) {
+      clearInterval(data.presenceRefresh);
+    }
+    const user = data.user;
     if (!user) return;
     await this.presence.markOffline(user.sub);
     if (user.role === 'STUDENT') {
