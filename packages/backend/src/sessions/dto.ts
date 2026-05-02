@@ -2,15 +2,23 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
-  IsUUID,
+  IsString,
+  Matches,
   Max,
   Min,
 } from 'class-validator';
 
-export class CreateSessionDto {
-  @IsUUID() exam_id!: string;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-  @IsArray() @ArrayMinSize(1) @IsUUID('4', { each: true })
+export class CreateSessionDto {
+  @IsString()
+  @Matches(UUID_PATTERN)
+  exam_id!: string;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  @Matches(UUID_PATTERN, { each: true })
   student_ids!: string[];
 
   @IsInt() @Min(1) @Max(360)

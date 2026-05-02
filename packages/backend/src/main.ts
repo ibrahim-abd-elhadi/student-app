@@ -1,5 +1,7 @@
-import * as dotenv from 'dotenv';
-dotenv.config();
+import { existsSync } from 'node:fs';
+import { config as dotenvConfig } from 'dotenv';
+const envPath = existsSync('.env') ? '.env' : '.env.example';
+dotenvConfig({ path: envPath });
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';

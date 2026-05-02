@@ -44,7 +44,6 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 const isDev = !electron_1.app.isPackaged;
 const DEV_BASE_URL = 'http://localhost:5174';
 let loginWin = null;
-let dashboardWin = null;
 let mainWin = null;
 const stateFile = path.join(electron_1.app.getPath('userData'), 'session.json');
 function loadSession() {
@@ -74,11 +73,6 @@ function getMainAppURL() {
         return `${DEV_BASE_URL}/exam.html?mode=host`;
     return `file://${path.join(__dirname, '..', 'dist-renderer', 'exam.html')}?mode=host`;
 }
-function getDashboardURL() {
-    if (isDev)
-        return `${DEV_BASE_URL}/dashboard.html`;
-    return `file://${path.join(__dirname, '..', 'dist-renderer', 'dashboard.html')}`;
-}
 function createLoginWindow() {
     if (loginWin)
         return loginWin.focus();
@@ -102,36 +96,6 @@ function createLoginWindow() {
         loginWin.webContents.openDevTools();
     loginWin.loadURL(getLoginURL()).catch(err => console.error('Login load error:', err));
     loginWin.on('closed', () => { loginWin = null; });
-}
-function createDashboardWindow() {
-    if (dashboardWin) {
-        dashboardWin.show();
-        dashboardWin.focus();
-        return;
-    }
-    dashboardWin = new electron_1.BrowserWindow({
-        width: 960,
-        height: 720,
-        title: 'Student Dashboard',
-        show: false,
-        webPreferences: {
-            preload: getPreloadPath(),
-            contextIsolation: true,
-            sandbox: false,
-        },
-    });
-    dashboardWin.once('ready-to-show', () => {
-        dashboardWin?.show();
-        dashboardWin?.focus();
-    });
-    if (isDev)
-        dashboardWin.webContents.openDevTools();
-    dashboardWin
-        .loadURL(getDashboardURL())
-        .catch((err) => console.error('Dashboard load error:', err));
-    dashboardWin.on('closed', () => {
-        dashboardWin = null;
-    });
 }
 function createMainWindow() {
     if (mainWin) {
@@ -159,12 +123,13 @@ function createMainWindow() {
 }
 electron_1.ipcMain.handle('login:complete', async (_, payload) => {
     saveSession(payload);
-    loginWin?.close();
-    createDashboardWindow();
-});
-electron_1.ipcMain.handle('dashboard:ready', async () => {
-    dashboardWin?.close();
     createMainWindow();
+});
+electron_1.ipcMain.handle('host:ready', async () => {
+    if (loginWin) {
+        loginWin.close();
+        loginWin = null;
+    }
 });
 electron_1.ipcMain.handle('session:get', async () => loadSession());
 electron_1.ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));

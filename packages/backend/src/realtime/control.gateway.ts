@@ -137,6 +137,19 @@ export class ControlGateway
 
   /* ---------- Student → Server events ---------- */
 
+  @SubscribeMessage('student:ready')
+  handleStudentReady(@ConnectedSocket() socket: Socket) {
+    this.requireRole(socket, 'STUDENT');
+    const u = this.userOf(socket);
+    this.io.to(`classroom:${u.classroom_id}`).emit('presence:update', {
+      user_id: u.sub,
+      online: true,
+      ready: true,
+      last_seen_at: new Date().toISOString(),
+    });
+    return { ok: true };
+  }
+
   @SubscribeMessage('answer:upsert')
   async handleAnswerUpsert(
     @ConnectedSocket() socket: Socket,

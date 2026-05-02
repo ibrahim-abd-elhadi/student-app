@@ -13,7 +13,6 @@ const isDev = !app.isPackaged;
 const DEV_BASE_URL = 'http://localhost:5174';
 
 let loginWin: BrowserWindow | null = null;
-let dashboardWin: BrowserWindow | null = null;
 let mainWin: BrowserWindow | null = null;
 
 const stateFile = path.join(app.getPath('userData'), 'session.json');
@@ -53,11 +52,6 @@ function getMainAppURL() {
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'exam.html')}?mode=host`;
 }
 
-function getDashboardURL() {
-  if (isDev) return `${DEV_BASE_URL}/dashboard.html`;
-  return `file://${path.join(__dirname, '..', 'dist-renderer', 'dashboard.html')}`;
-}
-
 function createLoginWindow() {
   if (loginWin) return loginWin.focus();
 
@@ -83,39 +77,6 @@ function createLoginWindow() {
 
   loginWin.loadURL(getLoginURL()).catch(err => console.error('Login load error:', err));
   loginWin.on('closed', () => { loginWin = null; });
-}
-
-function createDashboardWindow() {
-  if (dashboardWin) {
-    dashboardWin.show();
-    dashboardWin.focus();
-    return;
-  }
-  dashboardWin = new BrowserWindow({
-    width: 960,
-    height: 720,
-    title: 'Student Dashboard',
-    show: false,
-    webPreferences: {
-      preload: getPreloadPath(),
-      contextIsolation: true,
-      sandbox: false,
-    },
-  });
-
-  dashboardWin.once('ready-to-show', () => {
-    dashboardWin?.show();
-    dashboardWin?.focus();
-  });
-
-  if (isDev) dashboardWin.webContents.openDevTools();
-
-  dashboardWin
-    .loadURL(getDashboardURL())
-    .catch((err) => console.error('Dashboard load error:', err));
-  dashboardWin.on('closed', () => {
-    dashboardWin = null;
-  });
 }
 
 function createMainWindow() {
@@ -148,12 +109,13 @@ function createMainWindow() {
 
 ipcMain.handle('login:complete', async (_, payload: Session) => {
   saveSession(payload);
-  loginWin?.close();
-  createDashboardWindow();
-});
-ipcMain.handle('dashboard:ready', async () => {
-  dashboardWin?.close();
   createMainWindow();
+});
+ipcMain.handle('host:ready', async () => {
+  if (loginWin) {
+    loginWin.close();
+    loginWin = null;
+  }
 });
 ipcMain.handle('session:get', async () => loadSession());
 ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));

@@ -9,7 +9,8 @@ import { io, Socket } from 'socket.io-client';
 let socket: Socket | null = null;
 
 export async function startHost() {
-  const session = await window.studentApi.getSession();
+  const studentApi = (window as any).studentApi;
+  const session = await studentApi.getSession();
   if (!session) return;
 
   socket = io(`${session.base_url}/ws`, {
@@ -20,9 +21,13 @@ export async function startHost() {
     reconnectionDelayMax: 5_000,
   });
 
-  socket.on('connect', () => {
+  socket.on('connect', async () => {
     // eslint-disable-next-line no-console
     console.log('[host] connected');
+    if (studentApi?.hostReady) {
+      await studentApi.hostReady();
+    }
+    socket?.emit('student:ready');
   });
   socket.on('disconnect', (r) => {
     // eslint-disable-next-line no-console
@@ -30,24 +35,24 @@ export async function startHost() {
   });
 
   socket.on('lock:apply', async (p: { message?: string }) => {
-    await window.studentApi.applyLock(p?.message ?? '');
+    await studentApi.applyLock(p?.message ?? '');
   });
   socket.on('lock:release', async () => {
-    await window.studentApi.releaseLock();
+    await studentApi.releaseLock();
   });
 
   socket.on('exam:assigned', async (p: any) => {
-    await window.studentApi.openExam(p);
+    await studentApi.openExam(p);
   });
 
   socket.on('exam:closed', async (p: any) => {
     // eslint-disable-next-line no-console
     console.log('[host] exam closed', p);
-    await window.studentApi.closeExam();
+    await studentApi.closeExam();
   });
 
   socket.on('exam:cancelled', async () => {
-    await window.studentApi.closeExam();
+    await studentApi.closeExam();
   });
 
   // Expose the socket to the exam window via window-shared singleton.

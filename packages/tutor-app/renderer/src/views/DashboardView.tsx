@@ -18,7 +18,7 @@ export function DashboardView() {
     void api.listStudents(user.classroom_id).then(setRoster);
     const sock = api.connectSocket();
     sock.on('presence:update', (p: any) =>
-      upsertPresence(p.user_id, p.online, p.last_seen_at),
+      upsertPresence(p.user_id, p.online, p.last_seen_at, p.ready),
     );
     sock.on('student:state', (p: any) =>
       upsertStudentState(p.student_id, {
@@ -80,8 +80,17 @@ export function DashboardView() {
             </div>
             <div className="muted">@{s.username}</div>
             <div className="muted">
-              {s.online ? 'متصل' : s.last_seen_at ? `آخر ظهور: ${new Date(s.last_seen_at).toLocaleString('ar')}` : 'غير متصل'}
+              {s.online
+                ? s.ready
+                  ? 'متصل — في الانتظار'
+                  : 'متصل'
+                : s.last_seen_at
+                ? `آخر ظهور: ${new Date(s.last_seen_at).toLocaleString('ar')}`
+                : 'غير متصل'}
             </div>
+            {s.ready && s.online && !s.locked && (
+              <div style={{ color: '#0f766e' }}>● نشط ومنتظر المعلّم</div>
+            )}
             {s.locked && <div style={{ color: '#fbbf24' }}>● مقفول</div>}
             {s.suspicious && <div className="error">⚠ نشاط مشبوه</div>}
           </div>
