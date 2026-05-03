@@ -16,7 +16,7 @@ packages/
   designer-app/    Electron exam creation app
 infra/
   docker-compose.yml
-  db/init/         Postgres init + seed SQL
+  db/init/  
 ```
 
 ## Features
