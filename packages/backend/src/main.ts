@@ -3,6 +3,7 @@ dotenv.config();
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { config } from './config/configuration';
@@ -26,8 +27,21 @@ async function bootstrap() {
     }),
   );
 
+  // Use Socket.io adapter with custom path
+  app.useWebSocketAdapter(
+    new IoAdapter(app, {
+      path: '/ws/socket.io',
+      cors: {
+        origin: config.corsOrigins.includes('*') ? true : config.corsOrigins,
+        credentials: true,
+      },
+    }),
+  );
+
   await app.listen(config.httpPort, '0.0.0.0');
+  
   Logger.log(`Backend listening on http://0.0.0.0:${config.httpPort}`, 'Bootstrap');
+  Logger.log(`Socket.io server ready`, 'Bootstrap');
 }
 
 bootstrap();

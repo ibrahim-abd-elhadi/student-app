@@ -148,4 +148,11 @@ export class AttemptsService {
       answers: attempt.answers,
     };
   }
+
+  async listForStudent(studentId: string) {
+    return this.attempts.find({
+      where: { student_id: studentId },
+      relations: ['session'],
+    });
+  }
 }

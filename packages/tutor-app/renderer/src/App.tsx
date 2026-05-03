@@ -11,6 +11,8 @@ export function App() {
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
   const setUser = useApp((s) => s.setUser);
+  const setRoster = useApp((s) => s.setRoster);
+  const upsertPresence = useApp((s) => s.upsertPresence);
 
   useEffect(() => {
     const s = api.session;
@@ -21,8 +23,35 @@ export function App() {
         classroom_id: s.user.classroom_id,
       });
       setView('dashboard');
+
+      // Connect to WebSocket for real-time updates
+      try {
+        const socket = api.connectSocket();
+        
+        // Receive initial roster with online status
+        socket.on('presence:sync', (students: Array<{ user_id: string; online: boolean; last_seen_at: string | null }>) => {
+          console.debug('[tutor] presence:sync received', students);
+          setRoster(
+            students.map((s) => ({
+              id: s.user_id,
+              username: '', // Will be filled from other sources if needed
+              display_name: '', // Will be filled from other sources if needed
+              online: s.online,
+              last_seen_at: s.last_seen_at,
+            }))
+          );
+        });
+
+        // Listen for real-time presence updates
+        socket.on('presence:update', (update: { user_id: string; online: boolean; last_seen_at: string | null }) => {
+          console.debug('[tutor] presence:update received', update);
+          upsertPresence(update.user_id, update.online, update.last_seen_at);
+        });
+      } catch (err) {
+        console.warn('Failed to connect to WebSocket:', err);
+      }
     }
-  }, [setUser, setView]);
+  }, [setUser, setView, setRoster, upsertPresence]);
 
   return (
     <div className="shell">

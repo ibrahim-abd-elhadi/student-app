@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { listMyAttempts } from './api';
+import { initSocket } from './socket';
 import type { StudentAttemptSummary, AttemptState } from '@classroom/shared';
 import './styles.css';
 
@@ -86,6 +87,14 @@ function Dashboard() {
           return;
         }
         setSession(s);
+        
+        // Connect to WebSocket for real-time updates
+        try {
+          await initSocket();
+        } catch (socketErr) {
+          console.warn('Failed to connect to WebSocket:', socketErr);
+        }
+        
         const list = await listMyAttempts(s.base_url, s.access_token);
         setRows(list);
       } catch (e: any) {

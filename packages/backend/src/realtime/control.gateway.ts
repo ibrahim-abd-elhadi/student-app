@@ -3,6 +3,7 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -21,18 +22,18 @@ interface SocketUser extends JwtClaims {}
 @WebSocketGateway({
   namespace: '/ws',
   cors: { origin: true, credentials: true },
-  transports: ['websocket'],
-  pingInterval: 5_000,
-  pingTimeout: 10_000,
+  transports: ['websocket', 'polling'],
+  pingInterval: 5000,
+  pingTimeout: 10000,
 })
 export class ControlGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
+  @WebSocketServer()
+  server!: Server;
+
   private readonly log = new Logger('ControlGateway');
   private readonly activeSockets = new Map<string, number>();
-
-  @WebSocketServer()
-  io!: Server;
 
   constructor(
     private readonly auth: AuthService,
@@ -40,20 +41,22 @@ export class ControlGateway
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
     private readonly usersService: UsersService,
-  ) {}
+  ) {
+    this.log.log('ControlGateway instantiated');
+  }
 
-  /* ---------- Connection lifecycle ---------- */
+  afterInit(server: Server) {
+    this.log.log('Gateway initialized with Socket.io server');
+  }
 
-  private static readonly PRESENCE_REFRESH_INTERVAL = 10_000;
-
-  async handleConnection(socket: Socket): Promise<void> {
+  async handleConnection(socket: Socket & { data: { user?: SocketUser; presenceRefresh?: NodeJS.Timeout } }): Promise<void> {
     try {
       const token =
         (socket.handshake.auth?.token as string) ||
         this.extractBearer(socket.handshake.headers.authorization);
       if (!token) throw new Error('missing_token');
       const claims = await this.auth.verifyAccessToken(token);
-      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).user = claims;
+      socket.data.user = claims;
 
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
@@ -61,11 +64,11 @@ export class ControlGateway
       const active = (this.activeSockets.get(claims.sub) ?? 0) + 1;
       this.activeSockets.set(claims.sub, active);
       await this.presence.markOnline(claims.sub);
-      (socket.data as { user: SocketUser; presenceRefresh?: NodeJS.Timeout }).presenceRefresh = setInterval(
+      socket.data.presenceRefresh = setInterval(
         () => this.presence.refresh(claims.sub).catch((err) =>
           this.log.error(`Failed to refresh presence for ${claims.sub}: ${(err as Error).message}`),
         ),
-        ControlGateway.PRESENCE_REFRESH_INTERVAL,
+        10_000,
       );
 
       if (claims.role === 'TUTOR' || claims.role === 'ADMIN') {
@@ -81,7 +84,7 @@ export class ControlGateway
       }
 
       if (claims.role === 'STUDENT' && active === 1) {
-        this.io
+        this.server
           .to(`classroom:${claims.classroom_id}`)
           .emit('presence:update', {
             user_id: claims.sub,
@@ -114,7 +117,7 @@ export class ControlGateway
     this.activeSockets.delete(user.sub);
     await this.presence.markOffline(user.sub);
     if (user.role === 'STUDENT') {
-      this.io.to(`classroom:${user.classroom_id}`).emit('presence:update', {
+      this.server.to(`classroom:${user.classroom_id}`).emit('presence:update', {
         user_id: user.sub,
         online: false,
         last_seen_at: new Date().toISOString(),
@@ -136,10 +139,10 @@ export class ControlGateway
     for (const sid of body.student_ids) {
       // Defense in depth: we trust the tutor's classroom_id, not the client-provided ids.
       const room = `student:${sid}`;
-      const sockets = this.io.sockets.adapter.rooms.get(room);
+      const sockets = this.server.sockets.adapter.rooms.get(room);
       if (!sockets) continue;
       for (const sockId of sockets) {
-        const s = this.io.sockets.sockets.get(sockId);
+        const s = this.server.sockets.sockets.get(sockId);
         const u = (s?.data as { user?: SocketUser }).user;
         if (u && u.classroom_id === cls) {
           s!.emit('lock:apply', { message: body.message ?? '' });
@@ -160,10 +163,10 @@ export class ControlGateway
     let dispatched = 0;
     for (const sid of body.student_ids) {
       const room = `student:${sid}`;
-      const sockets = this.io.sockets.adapter.rooms.get(room);
+      const sockets = this.server.sockets.adapter.rooms.get(room);
       if (!sockets) continue;
       for (const sockId of sockets) {
-        const s = this.io.sockets.sockets.get(sockId);
+        const s = this.server.sockets.sockets.get(sockId);
         const u = (s?.data as { user?: SocketUser }).user;
         if (u && u.classroom_id === cls) {
           s!.emit('lock:release', {});
@@ -197,7 +200,7 @@ export class ControlGateway
         choice_id: body.choice_id,
         client_seq: body.client_seq,
       });
-      this.io.to(`classroom:${u.classroom_id}`).emit('attempt:progress', {
+      this.server.to(`classroom:${u.classroom_id}`).emit('attempt:progress', {
         session_id: body.session_id,
         student_id: u.sub,
         answered_count: result.answered_count,
@@ -218,7 +221,7 @@ export class ControlGateway
     try {
       const r = await this.attempts.submit(u.sub, body.session_id);
       const submitted_at = new Date().toISOString();
-      this.io.to(`classroom:${u.classroom_id}`).emit('attempt:submitted', {
+      this.server.to(`classroom:${u.classroom_id}`).emit('attempt:submitted', {
         session_id: body.session_id,
         student_id: u.sub,
         score: r.score,
@@ -253,7 +256,7 @@ export class ControlGateway
   ) {
     this.requireRole(socket, 'STUDENT');
     const u = this.userOf(socket);
-    this.io.to(`classroom:${u.classroom_id}`).emit('student:state', {
+    this.server.to(`classroom:${u.classroom_id}`).emit('student:state', {
       student_id: u.sub,
       ...body,
     });
@@ -265,7 +268,7 @@ export class ControlGateway
   /** Send the exam payload to each assigned student. */
   broadcastSessionAssigned(started: StartedSession): void {
     for (const a of started.attempts) {
-      this.io.to(`student:${a.student_id}`).emit('exam:assigned', {
+      this.server.to(`student:${a.student_id}`).emit('exam:assigned', {
         session_id: started.session.id,
         exam: started.exam,
         deadline_at: started.session.deadline_at!.toISOString(),
@@ -278,13 +281,13 @@ export class ControlGateway
     sessionId: string,
     reason: 'TUTOR_STOP' | 'DEADLINE' | 'ALL_SUBMITTED',
   ): void {
-    this.io.to(`classroom:${classroomId}`).emit('session:closed', {
+    this.server.to(`classroom:${classroomId}`).emit('session:closed', {
       session_id: sessionId,
       reason,
       state: 'CLOSED',
     });
     // Tell students this session is over (so they tear down the exam window).
-    this.io.to(`classroom:${classroomId}`).emit('exam:closed', {
+    this.server.to(`classroom:${classroomId}`).emit('exam:closed', {
       session_id: sessionId,
       reason,
     });

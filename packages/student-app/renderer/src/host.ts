@@ -13,7 +13,7 @@ export async function startHost() {
   if (!session) return;
 
   socket = io(session.base_url, {
-    namespace: '/ws',
+    path: '/ws/socket.io',
     transports: ['websocket'],
     auth: { token: session.access_token },
     reconnection: true,

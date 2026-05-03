@@ -93,7 +93,7 @@ function ExamApp() {
       const session = await window.studentApi.getSession();
       if (!session || cancelled) return;
       s = io(session.base_url, {
-        namespace: '/ws',
+        path: '/ws/socket.io',
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,

@@ -104,7 +104,7 @@ export class ApiClient {
     if (!s) throw new Error('no_session');
     if (this.socket?.connected) return this.socket;
     this.socket = io(this.baseUrl, {
-      namespace: '/ws',
+      path: '/ws/socket.io',
       transports: ['websocket'],
       auth: { token: s.access_token },
       reconnection: true,
@@ -119,5 +119,5 @@ export class ApiClient {
 }
 
 export const api = new ApiClient(
-  (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://127.0.0.1:8080',
+  (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://127.0.0.1:3000',
 );

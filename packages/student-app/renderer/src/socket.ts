@@ -1,31 +1,41 @@
 import { io, Socket } from "socket.io-client";
 
-let socket: Socket;
+let socket: Socket | null = null;
 
-export function initSocket() {
-socket = io("http://localhost:3000/", {
-transports: ["websocket"],
-});
+export async function initSocket(): Promise<Socket> {
+  // Get session from Electron context
+  const session = await window.studentApi.getSession();
+  if (!session) throw new Error("No active session");
 
-socket.on("connect", () => {
-console.log("Connected to server:", socket.id);
+  // Disconnect existing socket if any
+  if (socket?.connected) {
+    socket.disconnect();
+  }
 
-// 🔹 Send device info
-socket.emit("student:join", {
-  deviceName: navigator.userAgent,
-  status: "online",
-});
+  // Connect directly to Socket.io server
+  socket = io(session.base_url, {
+    transports: ["websocket"],
+    auth: { token: session.access_token },
+    reconnection: true,
+    reconnectionDelay: 500,
+    reconnectionDelayMax: 5_000,
+  });
 
+  socket.on("connect", () => {
+    console.log("[student] socket connected:", socket?.id);
+  });
 
-});
+  socket.on("disconnect", (reason) => {
+    console.log("[student] socket disconnected:", reason);
+  });
 
-socket.on("disconnect", () => {
-console.log("Disconnected from server");
-});
+  socket.on("connect_error", (err) => {
+    console.error("[student] socket connect_error:", err);
+  });
 
-return socket;
+  return socket;
 }
 
-export function getSocket() {
-return socket;
+export function getSocket(): Socket | null {
+  return socket;
 }

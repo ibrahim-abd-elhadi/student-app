@@ -76,6 +76,22 @@ export interface PresenceEntry {
     online: boolean;
     last_seen_at: string | null;
 }
+/** Summary of one of the calling student's own attempts, for the student dashboard. */
+export interface StudentAttemptSummary {
+    attempt_id: string;
+    session_id: string;
+    exam_id: string;
+    exam_title: string;
+    state: AttemptState;
+    session_state: SessionState;
+    score: number | null;
+    total_points: number | null;
+    answered_count: number;
+    started_at: string | null;
+    submitted_at: string | null;
+    deadline_at: string | null;
+    created_at: string;
+}
 export interface SessionReport {
     session_id: string;
     exam_title: string;
