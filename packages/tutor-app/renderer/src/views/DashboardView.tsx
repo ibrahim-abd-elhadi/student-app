@@ -31,6 +31,7 @@ export function DashboardView() {
     };
 
     refreshRoster();
+    const rosterTimer = window.setInterval(refreshRoster, 5_000);
 
     sock.on('connect', () => {
       console.log('✅ Tutor socket connected:', sock.id);
@@ -66,6 +67,7 @@ export function DashboardView() {
     });
 
     return () => {
+      window.clearInterval(rosterTimer);
       sock.off('connect');
       sock.off('disconnect');
       sock.off('connect_error');

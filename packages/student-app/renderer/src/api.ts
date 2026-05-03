@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { StudentAttemptSummary } from '@classroom/shared';
+import type { StudentAttemptSummary, StudentExamPayload } from '@classroom/shared';
 
 export async function login(baseUrl: string, username: string, password: string) {
   const { data } = await axios.post(`${baseUrl}/api/v1/auth/login`, { username, password });
@@ -18,6 +18,43 @@ export async function listMyAttempts(
   const { data } = await axios.get(`${baseUrl}/api/v1/me/attempts`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
+  return data;
+}
+
+export async function markOnline(baseUrl: string, accessToken: string) {
+  const { data } = await axios.post(
+    `${baseUrl}/api/v1/me/online`,
+    {},
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  return data;
+}
+
+export async function getActiveExam(
+  baseUrl: string,
+  accessToken: string,
+): Promise<{
+  session_id: string;
+  deadline_at: string;
+  exam: StudentExamPayload;
+} | null> {
+  const { data } = await axios.get(`${baseUrl}/api/v1/me/active-exam`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return data;
+}
+
+export async function submitAttempt(
+  baseUrl: string,
+  accessToken: string,
+  sessionId: string,
+  answers: Record<string, string>,
+): Promise<{ score: number | null }> {
+  const { data } = await axios.post(
+    `${baseUrl}/api/v1/me/attempts/${sessionId}/submit`,
+    { answers },
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
   return data;
 }
 

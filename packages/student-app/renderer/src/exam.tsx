@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { io, Socket } from 'socket.io-client';
+import { submitAttempt } from './api';
 import './styles.css';
 
 interface ExamPayload {
@@ -55,33 +56,42 @@ function ExamApp() {
   const [now, setNow] = useState(Date.now());
   const [connected, setConnected] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
   const seqRef = useRef(0);
   const socketRef = useRef<Socket | null>(null);
 
+  const applyExamPayload = useCallback((p: ExamPayload) => {
+    setPayload(p);
+    const persisted = loadPersisted(p.session_id);
+    if (persisted) {
+      setAnswers(persisted.answers);
+      seqRef.current = persisted.client_seq;
+    } else {
+      setAnswers({});
+      seqRef.current = 0;
+    }
+    persist({
+      session_id: p.session_id,
+      exam_id: p.exam.id,
+      deadline_at: p.deadline_at,
+      answers: persisted?.answers ?? {},
+      client_seq: persisted?.client_seq ?? 0,
+      exam_payload: p.exam,
+    });
+  }, []);
+
   // Receive payload from main process; also rehydrate any persisted answers.
   useEffect(() => {
-    const off = window.studentApi.onExamStart(async (p: ExamPayload) => {
-      setPayload(p);
-      const persisted = loadPersisted(p.session_id);
-      if (persisted) {
-        setAnswers(persisted.answers);
-        seqRef.current = persisted.client_seq;
-      } else {
-        setAnswers({});
-        seqRef.current = 0;
-      }
-      persist({
-        session_id: p.session_id,
-        exam_id: p.exam.id,
-        deadline_at: p.deadline_at,
-        answers: persisted?.answers ?? {},
-        client_seq: persisted?.client_seq ?? 0,
-        exam_payload: p.exam,
-      });
+    const off = window.studentApi.onExamStart((p: ExamPayload) => {
+      applyExamPayload(p);
+    });
+    void window.studentApi.getPendingExam().then((p: ExamPayload | null) => {
+      if (p) applyExamPayload(p);
     });
     return off;
-  }, []);
+  }, [applyExamPayload]);
 
   // Build socket. We can't rely on the host window's socket because we live
   // in a separate BrowserWindow; we open our own connection using the same
@@ -92,7 +102,7 @@ function ExamApp() {
     (async () => {
       const session = await window.studentApi.getSession();
       if (!session || cancelled) return;
-      s = io(`${session.base_url}/ws`, {
+      s = io(session.base_url, {
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,
@@ -185,17 +195,27 @@ function ExamApp() {
   );
 
   async function submit() {
-    if (!payload || !socketRef.current) return;
-    socketRef.current
-      .timeout(5000)
-      .emit('exam:submit', { session_id: payload.session_id }, (_err: any, ack: any) => {
-        if (ack?.ok) {
-          clearPersisted();
-          setSubmitted(true);
-          setScore(ack.score ?? null);
-          setTimeout(() => window.studentApi.closeExam(), 8080);
-        }
-      });
+    if (!payload || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const session = await window.studentApi.getSession();
+      if (!session) throw new Error('no_session');
+      const result = await submitAttempt(
+        session.base_url,
+        session.access_token,
+        payload.session_id,
+        answers,
+      );
+      clearPersisted();
+      setSubmitted(true);
+      setScore(result.score ?? null);
+      setTimeout(() => window.studentApi.closeExam(), 8080);
+    } catch (e: any) {
+      setSubmitError(e?.response?.data?.message ?? e?.message ?? 'فشل التسليم');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (!payload) {
@@ -226,6 +246,7 @@ function ExamApp() {
         </div>
       </header>
       <div className="stage">
+        {submitError && <div className="error">{submitError}</div>}
         <div className="muted">سؤال {current + 1} من {orderedQuestions.length}</div>
         <div className="q">
           <div className="prompt">{q.prompt}</div>
@@ -270,7 +291,7 @@ function ExamApp() {
           >
             التالي
           </button>
-          <button onClick={submit} disabled={!connected}>تسليم نهائي</button>
+          <button onClick={submit} disabled={submitting}>تسليم نهائي</button>
         </div>
       </footer>
     </div>

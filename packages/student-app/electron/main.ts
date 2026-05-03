@@ -13,8 +13,10 @@ const DEV_BASE_URL = 'http://localhost:5174';
 
 let loginWin: BrowserWindow | null = null;
 let mainWin: BrowserWindow | null = null;
+let hostWin: BrowserWindow | null = null;
 let examWin: BrowserWindow | null = null;
 let lockWin: BrowserWindow | null = null;
+let pendingExamPayload: any = null;
 
 const stateFile = path.join(app.getPath('userData'), 'session.json');
 
@@ -49,9 +51,14 @@ function getLoginURL() {
 }
 
 /** This is the HOST page – the hidden window that maintains the WebSocket */
-function getMainAppURL() {
+function getHostURL() {
   if (isDev) return `${DEV_BASE_URL}/login?mode=host`;
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'login.html')}?mode=host`;
+}
+
+function getDashboardURL() {
+  if (isDev) return `${DEV_BASE_URL}/dashboard.html`;
+  return `file://${path.join(__dirname, '..', 'dist-renderer', 'dashboard.html')}`;
 }
 
 /** This is the exam page – full‑screen when the exam starts */
@@ -119,8 +126,31 @@ function createMainWindow() {
     console.error(`Main window failed: ${errorDesc} (${errorCode})`);
   });
 
-  mainWin.loadURL(getMainAppURL()).catch(err => console.error('Main window load error:', err));
+  mainWin.loadURL(getDashboardURL()).catch(err => console.error('Main window load error:', err));
   mainWin.on('closed', () => { mainWin = null; });
+}
+
+function createHostWindow() {
+  if (hostWin) return;
+
+  hostWin = new BrowserWindow({
+    width: 360,
+    height: 220,
+    show: false,
+    skipTaskbar: true,
+    webPreferences: {
+      preload: getPreloadPath(),
+      contextIsolation: true,
+      sandbox: false,
+    },
+  });
+
+  hostWin.webContents.on('did-fail-load', (_, errorCode, errorDesc) => {
+    console.error(`Host window failed: ${errorDesc} (${errorCode})`);
+  });
+
+  hostWin.loadURL(getHostURL()).catch(err => console.error('Host window load error:', err));
+  hostWin.on('closed', () => { hostWin = null; });
 }
 
 // ===================== IPC Handlers =====================
@@ -129,14 +159,15 @@ ipcMain.handle('login:complete', async (_, payload: Session) => {
   console.log('[main] login:complete');
   saveSession(payload);
   createMainWindow();
-});
-
-ipcMain.handle('host:ready', async () => {
-  console.log('[main] host:ready');
   if (loginWin) {
     loginWin.close();
     loginWin = null;
   }
+});
+
+ipcMain.handle('host:ready', async () => {
+  console.log('[main] host:ready');
+  mainWin?.webContents.send('online:ready');
 });
 
 ipcMain.handle('session:get', async () => {
@@ -148,10 +179,8 @@ ipcMain.handle('session:get', async () => {
 ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));
 
 ipcMain.handle('dashboard:ready', async () => {
-  console.log('[main] dashboard:ready – hiding main window');
-  if (mainWin) {
-    mainWin.hide();
-  }
+  console.log('[main] dashboard:ready - starting host connection');
+  createHostWindow();
 });
 
 ipcMain.handle('lock:apply', async (_, msg: string) => {
@@ -193,8 +222,10 @@ ipcMain.handle('lock:release', async () => {
 
 ipcMain.handle('exam:open', async (_, payload: any) => {
   console.log('[main] exam:open', payload);
+  pendingExamPayload = payload;
   if (examWin) {
     examWin.focus();
+    examWin.webContents.send('exam:start', payload);
     return;
   }
   examWin = new BrowserWindow({
@@ -207,10 +238,7 @@ ipcMain.handle('exam:open', async (_, payload: any) => {
     },
   });
 
-  examWin.loadURL(getExamURL()).then(() => {
-    console.log('[main] exam window loaded, sending exam:start');
-    examWin?.webContents.send('exam:start', payload);
-  }).catch(err => console.error('[main] exam window load error:', err));
+  examWin.loadURL(getExamURL()).catch(err => console.error('[main] exam window load error:', err));
 
   examWin.on('closed', () => {
     console.log('[main] exam window closed');
@@ -220,11 +248,14 @@ ipcMain.handle('exam:open', async (_, payload: any) => {
 
 ipcMain.handle('exam:close', async () => {
   console.log('[main] exam:close');
+  pendingExamPayload = null;
   if (examWin) {
     examWin.close();
     examWin = null;
   }
 });
+
+ipcMain.handle('exam:get-pending', async () => pendingExamPayload);
 
 // ===================== App Lifecycle =====================
 

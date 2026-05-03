@@ -136,6 +136,68 @@ export class AttemptsService {
     });
   }
 
+  async submitSnapshot(
+    studentId: string,
+    sessionId: string,
+    answers: Record<string, string>,
+  ): Promise<{ score: number | null }> {
+    return this.ds.transaction(async (m) => {
+      const attempt = await m
+        .createQueryBuilder(Attempt, 'a')
+        .setLock('pessimistic_write')
+        .where('a.session_id = :s AND a.student_id = :u', {
+          s: sessionId,
+          u: studentId,
+        })
+        .getOne();
+      if (!attempt) throw new NotFoundException('attempt_not_found');
+      if (attempt.state === 'SUBMITTED') {
+        return { score: attempt.score };
+      }
+
+      const session = await m.findOneByOrFail(Session, { id: sessionId });
+      if (session.state !== 'ACTIVE') {
+        throw new ConflictException('session_not_active');
+      }
+
+      const questions = await m.find(Question, {
+        where: { exam_id: session.exam_id },
+      });
+      const byId = new Map(questions.map((q) => [q.id, q]));
+      const cleanAnswers: Record<string, string> = {};
+      for (const [questionId, choiceId] of Object.entries(answers ?? {})) {
+        const question = byId.get(questionId);
+        if (!question) continue;
+        if (question.choices.some((c) => c.id === choiceId)) {
+          cleanAnswers[questionId] = choiceId;
+        }
+      }
+
+      attempt.answers = cleanAnswers;
+      attempt.answered_count = Object.keys(cleanAnswers).length;
+      attempt.score = this.sessionsService.scoreAnswers(cleanAnswers, questions);
+      attempt.state = 'SUBMITTED';
+      attempt.started_at = attempt.started_at ?? new Date();
+      attempt.submitted_at = new Date();
+      attempt.client_seq = Math.max(
+        attempt.client_seq,
+        attempt.answered_count,
+      );
+      await m.save(attempt);
+
+      await this.audit.record({
+        classroom_id: session.classroom_id,
+        actor_id: studentId,
+        action: 'ATTEMPT_SUBMIT',
+        target_type: 'attempt',
+        target_id: attempt.id,
+        metadata: { score: attempt.score },
+      });
+
+      return { score: attempt.score };
+    });
+  }
+
   async listForStudent(studentId: string): Promise<StudentAttemptSummary[]> {
     const rows = await this.attempts.find({
       where: { student_id: studentId },
