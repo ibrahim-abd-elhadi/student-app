@@ -21,7 +21,14 @@ contextBridge.exposeInMainWorld('studentApi', {
   /* ================= EXAM ================= */
   openExam: (payload: any) => ipcRenderer.invoke('exam:open', payload),
   closeExam: () => ipcRenderer.invoke('exam:close'),
+  getPendingExam: () => ipcRenderer.invoke('exam:get-pending'),
   hostReady: () => ipcRenderer.invoke('host:ready'),
+
+  onOnlineReady: (cb: () => void) => {
+    const handler = () => cb();
+    ipcRenderer.on('online:ready', handler);
+    return () => ipcRenderer.removeListener('online:ready', handler);
+  },
 
   /* ================= EVENTS ================= */
   onExamStart: (cb: (p: any) => void) => {
@@ -49,7 +56,9 @@ declare global {
       releaseLock: () => Promise<void>;
       openExam: (p: any) => Promise<void>;
       closeExam: () => Promise<void>;
+      getPendingExam: () => Promise<any>;
       hostReady: () => Promise<void>;
+      onOnlineReady: (cb: () => void) => () => void;
       onExamStart: (cb: (p: any) => void) => () => void;
       onExamReload: (cb: (p: any) => void) => () => void;
     };

@@ -2,8 +2,14 @@ import { io, Socket } from 'socket.io-client';
 import { refreshToken, decodeJwt } from './api';
 
 let socket: Socket | null = null;
+let readyHeartbeat: number | null = null;
 
 export async function startHost() {
+  if (socket?.connected) {
+    socket.emit('student:ready');
+    return;
+  }
+
   const studentApi = (window as any).studentApi;
   let session = await studentApi.getSession();
   if (!session) {
@@ -49,6 +55,10 @@ export async function startHost() {
     console.log('[host] ✅ Socket connected');
     if (studentApi?.hostReady) await studentApi.hostReady();
     socket?.emit('student:ready');
+    if (readyHeartbeat) window.clearInterval(readyHeartbeat);
+    readyHeartbeat = window.setInterval(() => {
+      socket?.emit('student:ready');
+    }, 15_000);
   });
 
   socket.on('connect_error', (err: Error) => {
@@ -57,6 +67,10 @@ export async function startHost() {
 
   socket.on('disconnect', (reason: string) => {
     console.warn('[host] Disconnected:', reason);
+    if (readyHeartbeat) {
+      window.clearInterval(readyHeartbeat);
+      readyHeartbeat = null;
+    }
   });
 
   socket.on('lock:apply', async (p: { message?: string }) => {

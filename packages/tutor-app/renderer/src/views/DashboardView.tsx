@@ -95,18 +95,70 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    loadData();
-  }, []);
+    const sock = api.connectSocket();
 
-  const recent = useMemo(() => (rows ?? []).slice(0, 10), [rows]);
+    const refreshRoster = async () => {
+      try {
+        const list = await api.listStudents(user.classroom_id);
+        setRoster(list);
+      } catch (err) {
+        console.error('Roster fetch failed:', err);
+      }
+    };
 
-  async function ready() {
-    setReadying(true);
-    try {
-      await window.studentApi.dashboardReady();
-    } finally {
-      setReadying(false);
-    }
+    refreshRoster();
+    const rosterTimer = window.setInterval(refreshRoster, 5_000);
+
+    sock.on('connect', () => {
+      console.log('✅ Tutor socket connected:', sock.id);
+      refreshRoster();
+    });
+
+    sock.on('disconnect', () => {
+      console.log('❌ Tutor socket disconnected');
+    });
+
+    sock.on('connect_error', (err) => {
+      console.error('Socket connect error:', err.message);
+    });
+
+    sock.on('presence:update', (p: any) => {
+      console.log('presence:update =>', p);
+
+      upsertPresence(
+        p.user_id,
+        p.online,
+        p.last_seen_at ?? null,
+        p.ready ?? false
+      );
+    });
+
+    sock.on('student:state', (p: any) => {
+      console.log('student:state =>', p);
+
+      upsertStudentState(p.student_id, {
+        locked: p.locked,
+        suspicious: p.suspicious,
+      });
+    });
+
+    return () => {
+      window.clearInterval(rosterTimer);
+      sock.off('connect');
+      sock.off('disconnect');
+      sock.off('connect_error');
+      sock.off('presence:update');
+      sock.off('student:state');
+    };
+  }, [user.classroom_id]);
+
+  function lock() {
+    if (selected.size === 0) return;
+
+    api.connectSocket().emit('student:lock', {
+      student_ids: [...selected],
+      message: 'تم قفل الجهاز من قبل المعلّم',
+    });
   }
 
   async function refresh() {
@@ -178,5 +230,3 @@ function Dashboard() {
     </div>
   );
 }
-
-ReactDOM.createRoot(document.getElementById('root')!).render(<Dashboard />);

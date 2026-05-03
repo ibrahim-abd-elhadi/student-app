@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { io, Socket } from 'socket.io-client';
+import { submitAttempt } from './api';
 import './styles.css';
 
 interface ExamPayload {
@@ -79,6 +80,8 @@ function ExamApp() {
   const [now, setNow] = useState(Date.now());
   const [connected, setConnected] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -87,34 +90,36 @@ function ExamApp() {
   const pendingAnswersRef = useRef<PendingAnswer[]>([]);
   const flushTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load pending answers from storage on mount
-  useEffect(() => {
-    pendingAnswersRef.current = loadPendingAnswers();
+  const applyExamPayload = useCallback((p: ExamPayload) => {
+    setPayload(p);
+    const persisted = loadPersisted(p.session_id);
+    if (persisted) {
+      setAnswers(persisted.answers);
+      seqRef.current = persisted.client_seq;
+    } else {
+      setAnswers({});
+      seqRef.current = 0;
+    }
+    persist({
+      session_id: p.session_id,
+      exam_id: p.exam.id,
+      deadline_at: p.deadline_at,
+      answers: persisted?.answers ?? {},
+      client_seq: persisted?.client_seq ?? 0,
+      exam_payload: p.exam,
+    });
   }, []);
 
-  // Receive payload from main process
+  // Receive payload from main process; also rehydrate any persisted answers.
   useEffect(() => {
-    const off = window.studentApi.onExamStart(async (p: ExamPayload) => {
-      setPayload(p);
-      const persisted = loadPersisted(p.session_id);
-      if (persisted) {
-        setAnswers(persisted.answers);
-        seqRef.current = persisted.client_seq;
-      } else {
-        setAnswers({});
-        seqRef.current = 0;
-      }
-      persist({
-        session_id: p.session_id,
-        exam_id: p.exam.id,
-        deadline_at: p.deadline_at,
-        answers: persisted?.answers ?? {},
-        client_seq: persisted?.client_seq ?? 0,
-        exam_payload: p.exam,
-      });
+    const off = window.studentApi.onExamStart((p: ExamPayload) => {
+      applyExamPayload(p);
+    });
+    void window.studentApi.getPendingExam().then((p: ExamPayload | null) => {
+      if (p) applyExamPayload(p);
     });
     return off;
-  }, []);
+  }, [applyExamPayload]);
 
   // Flush pending answers when connected
   const flushPendingAnswers = useCallback(() => {
@@ -149,7 +154,6 @@ function ExamApp() {
       const session = await window.studentApi.getSession();
       if (!session || cancelled) return;
       s = io(session.base_url, {
-        path: '/ws',
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,
@@ -283,29 +287,27 @@ function ExamApp() {
   );
 
   async function submit() {
-    if (!payload || !socketRef.current || isSubmitting) return;
-    
-    setIsSubmitting(true);
-    
-    // Final flush of pending answers
-    flushPendingAnswers();
-    
-    // Give a moment for pending answers to be sent
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    socketRef.current
-      .timeout(10000)
-      .emit('exam:submit', { session_id: payload.session_id }, (err: any, ack: any) => {
-        if (ack?.ok) {
-          clearPersisted();
-          setSubmitted(true);
-          setScore(ack.score ?? null);
-          setTimeout(() => window.studentApi.closeExam(), 3000);
-        } else {
-          setError(err?.message || 'Submission failed. Please contact your teacher.');
-        }
-        setIsSubmitting(false);
-      });
+    if (!payload || submitting) return;
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      const session = await window.studentApi.getSession();
+      if (!session) throw new Error('no_session');
+      const result = await submitAttempt(
+        session.base_url,
+        session.access_token,
+        payload.session_id,
+        answers,
+      );
+      clearPersisted();
+      setSubmitted(true);
+      setScore(result.score ?? null);
+      setTimeout(() => window.studentApi.closeExam(), 8080);
+    } catch (e: any) {
+      setSubmitError(e?.response?.data?.message ?? e?.message ?? 'فشل التسليم');
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   // Auto-submit on expiry
@@ -373,15 +375,8 @@ function ExamApp() {
         </div>
       </header>
       <div className="stage">
-        <div className="progress-bar" style={{ marginBottom: 24 }}>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${progressPercent}%` }} />
-          </div>
-          <div className="muted" style={{ textAlign: 'center', marginTop: 8 }}>
-            {answeredCount} من {orderedQuestions.length} تمت الإجابة
-          </div>
-        </div>
-        
+        {submitError && <div className="error">{submitError}</div>}
+        <div className="muted">سؤال {current + 1} من {orderedQuestions.length}</div>
         <div className="q">
           <div className="prompt">{q.prompt}</div>
           <div className="choices">
@@ -424,9 +419,7 @@ function ExamApp() {
           >
             التالي
           </button>
-          <button onClick={submit} disabled={!connected || isSubmitting}>
-            {isSubmitting ? 'جاري التسليم...' : 'تسليم نهائي'}
-          </button>
+          <button onClick={submit} disabled={submitting}>تسليم نهائي</button>
         </div>
       </footer>
     </div>

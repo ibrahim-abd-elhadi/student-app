@@ -163,9 +163,10 @@ export class ControlGateway
   }
 
   @SubscribeMessage('student:ready')
-  handleStudentReady(@ConnectedSocket() socket: Socket) {
+  async handleStudentReady(@ConnectedSocket() socket: Socket) {
     this.requireRole(socket, 'STUDENT');
     const u = this.userOf(socket);
+    await this.presence.markOnline(u.sub);
     this.io.to(`classroom:${u.classroom_id}`).emit('presence:update', {
       user_id: u.sub,
       online: true,

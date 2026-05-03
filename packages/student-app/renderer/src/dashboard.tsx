@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { listMyAttempts } from './api';
+import { getActiveExam, listMyAttempts, markOnline } from './api';
+import { startHost } from './host';
 import type { StudentAttemptSummary, AttemptState } from '@classroom/shared';
 import './styles.css';
 
@@ -76,6 +77,11 @@ function Dashboard() {
   const [rows, setRows] = useState<StudentAttemptSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [readying, setReadying] = useState(false);
+  const [onlineRequested, setOnlineRequested] = useState(false);
+  const [online, setOnline] = useState(false);
+  const onlineHeartbeatRef = useRef<number | null>(null);
+  const examPollRef = useRef<number | null>(null);
+  const openedExamRef = useRef<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -94,14 +100,62 @@ function Dashboard() {
     })();
   }, []);
 
+  useEffect(() => {
+    return window.studentApi.onOnlineReady(() => {
+      setOnline(true);
+      setReadying(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (onlineHeartbeatRef.current != null) {
+        window.clearInterval(onlineHeartbeatRef.current);
+      }
+      if (examPollRef.current != null) {
+        window.clearInterval(examPollRef.current);
+      }
+    };
+  }, []);
+
   const recent = useMemo(() => (rows ?? []).slice(0, 10), [rows]);
 
   async function ready() {
+    if (!session) return;
     setReadying(true);
     try {
-      await window.studentApi.dashboardReady();
+      setOnlineRequested(true);
+      await markOnline(session.base_url, session.access_token);
+      setOnline(true);
+      if (onlineHeartbeatRef.current != null) {
+        window.clearInterval(onlineHeartbeatRef.current);
+      }
+      onlineHeartbeatRef.current = window.setInterval(() => {
+        void markOnline(session.base_url, session.access_token).catch((e) => {
+          console.warn('online heartbeat failed:', e);
+        });
+      }, 15_000);
+      await checkForActiveExam(session);
+      if (examPollRef.current != null) {
+        window.clearInterval(examPollRef.current);
+      }
+      examPollRef.current = window.setInterval(() => {
+        void checkForActiveExam(session);
+      }, 5_000);
+      await startHost();
     } finally {
       setReadying(false);
+    }
+  }
+
+  async function checkForActiveExam(s: Session) {
+    try {
+      const active = await getActiveExam(s.base_url, s.access_token);
+      if (!active || openedExamRef.current === active.session_id) return;
+      openedExamRef.current = active.session_id;
+      await window.studentApi.openExam(active);
+    } catch (e) {
+      console.warn('active exam poll failed:', e);
     }
   }
 
@@ -112,8 +166,8 @@ function Dashboard() {
           <h1>أهلاً، {session?.user.display_name ?? '...'}</h1>
           <div className="muted">لوحة الطالب</div>
         </div>
-        <button onClick={ready} disabled={readying}>
-          {readying ? '...' : 'استعداد'}
+        <button onClick={ready} disabled={readying || onlineRequested}>
+          {online ? 'أونلاين' : readying || onlineRequested ? 'جاري الاتصال' : 'ظهور أونلاين'}
         </button>
       </header>
 
@@ -158,7 +212,7 @@ function Dashboard() {
       </section>
 
       <p className="muted" style={{ marginTop: 16 }}>
-        عند الضغط على «استعداد» سيُخفى التطبيق في الخلفية بانتظار أوامر المعلّم.
+        اضغط «ظهور أونلاين» عندما تكون جاهزا. بعد ظهور حالة «أونلاين» سيستقبل التطبيق أوامر المعلم.
       </p>
     </div>
   );

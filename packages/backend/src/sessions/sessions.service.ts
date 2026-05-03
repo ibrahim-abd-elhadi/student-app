@@ -213,6 +213,37 @@ export class SessionsService {
     };
   }
 
+  async getActiveExamForStudent(studentId: string): Promise<{
+    session_id: string;
+    deadline_at: string;
+    exam: StudentExamPayload;
+  } | null> {
+    const attempt = await this.attempts
+      .createQueryBuilder('a')
+      .innerJoinAndSelect('a.session', 's')
+      .where('a.student_id = :studentId', { studentId })
+      .andWhere('a.state IN (:...attemptStates)', {
+        attemptStates: ['ASSIGNED', 'IN_PROGRESS'],
+      })
+      .andWhere('s.state = :sessionState', { sessionState: 'ACTIVE' })
+      .andWhere('s.deadline_at IS NOT NULL')
+      .andWhere('s.deadline_at > NOW()')
+      .orderBy('s.started_at', 'DESC')
+      .getOne();
+
+    if (!attempt?.session?.deadline_at) return null;
+
+    const exam = await this.examsService.loadStudentPayload(
+      attempt.session.exam_id,
+    );
+
+    return {
+      session_id: attempt.session_id,
+      deadline_at: attempt.session.deadline_at.toISOString(),
+      exam,
+    };
+  }
+
   /** Used by scheduler. Returns ACTIVE sessions whose deadline has passed. */
   async findExpiredActive(): Promise<Session[]> {
     return this.sessions
