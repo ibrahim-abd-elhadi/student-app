@@ -35,6 +35,7 @@ export async function startHost() {
   const token = session.access_token;
   console.log('[host] Connecting to WebSocket...');
 
+  // Fix: Use same path pattern as tutor app - no /ws in URL, use path option
   socket = io(session.base_url, {
     path: '/ws',
     transports: ['websocket'],

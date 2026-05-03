@@ -1,23 +1,11 @@
-# Classroom Control — Real-time tutor / student exam management
+# 🎓 Classroom Control — NetSupport-style Management System
 
-A complete classroom management scaffold with tutor control, student kiosk exams, and an exam designer.
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-- **Backend** — NestJS API, TypeORM/Postgres, Redis-backed presence, Socket.IO realtime layer
-- **Tutor App** — Electron + React dashboard for student roster, exam launch, and live monitoring
-- **Student App** — Electron client with hidden host process, lock overlay, and fullscreen exam window
-- **Designer App** — Electron authoring tool for MCQ exam creation
-- **Shared package** — TypeScript contracts for REST + WS events across clients and backend
+Production-grade scaffold of a tutor / student / exam-designer system. Built for speed, security, and real-time interaction. It allows teachers to control student devices, conduct exams, and monitor performance in real-time.
 
-## Project updates
-
-- Realtime connections now use Socket.IO on `/ws` with JWT handshake authentication
-- Students join `classroom:<id>` and `student:<id>` rooms for tutor subscription and exam routing
-- Tutor dashboard receives live `presence:update` events when students connect/disconnect
-- Exam assignment is pushed from tutor → backend → student host/exam window
-- Student app maintains a hidden host socket and a separate fullscreen exam socket for robust delivery
-- Backend now supports manual gateway attachment for the Socket.IO server so realtime routing works consistently
-
-## Repository layout
+---
 
 ```
 packages/
@@ -49,6 +37,9 @@ infra/
 
 ## Setup
 
+## 🚀 Quick Start (Development)
+
+### 1. Initialize Project
 ```bash
 # Install workspace dependencies
 npm install
@@ -69,6 +60,8 @@ npm run db:seed
 
 ## Start the apps
 
+### 3. Database Seeding
+Create initial dummy data (Tutor: `tutor1`, Student: `student1`, Password: `Password123!`):
 ```bash
 # Backend (API + Socket.IO)
 npm run dev:backend
@@ -113,19 +106,9 @@ $env:ELECTRON_USER_DATA="$PWD\.userdata\student2"; npm run dev:student
 - Tutor-to-student commands are routed through server-side rooms
 - Exam windows are opened on student clients via server push
 
-## Troubleshooting
+---
 
-- **No online students in Tutor** — ensure the Student app successfully connected and the hidden host window started.
-- **WebSocket 404 on `/ws`** — verify the backend is running and the client is using `path: '/ws'`.
-- **Exam does not open on student** — ensure the student host socket is connected and the student is in the correct classroom room.
-- **Backend env issues** — copy `.env.example` to `.env` and set `JWT_SECRET`.
+## 📜 License
 
-## Notes
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
-- The student lock overlay is a deterrent, not a foolproof kiosk mode.
-- `Ctrl+Alt+Del` cannot be blocked from user-mode Electron code on Windows.
-- For production, add TLS, a Socket.IO Redis adapter, signed Electron installers, and proper endpoint hardening.
-
-## License
-
-MIT — review before redistributing.

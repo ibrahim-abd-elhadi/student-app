@@ -15,7 +15,8 @@
     "@nestjs/core": "11.1.19",
     "axios": "^1.6.8",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "rolldown": "^1.0.0-beta.20"
   },
   "devDependencies": {
     "@types/react": "^18.2.79",
