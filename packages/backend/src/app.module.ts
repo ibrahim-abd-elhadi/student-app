@@ -12,24 +12,36 @@ import { UsersModule } from './users/users.module';
 import { CommonModule } from './common/common.module';
 import { entities } from './entities';
 
+/**
+ * Root module of the application.
+ * It coordinates all other modules and provides global configurations
+ * for database, scheduling, and environment variables.
+ */
 @Module({
   imports: [
+    // Load environment variables globally
     ConfigModule.forRoot({ isGlobal: true }),
+    
+    // Enable task scheduling (cron jobs, etc.)
     ScheduleModule.forRoot(),
+    
+    // Configure Database connection using TypeORM
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: config.databaseUrl,
       entities,
-      synchronize: false,        // schema is managed by SQL files in infra/db
+      synchronize: false,        // schema is managed by SQL files in infra/db (Manual migrations recommended for prod)
       logging: config.env === 'development' ? ['error', 'warn'] : ['error'],
     }),
-    CommonModule,
-    AuthModule,
-    UsersModule,
-    ExamsModule,
-    SessionsModule,
-    RealtimeModule,
-    ReportsModule,
+
+    // Feature Modules
+    CommonModule,   // Shared utilities and services
+    AuthModule,     // Authentication and Authorization
+    UsersModule,    // User management (Tutors, Students)
+    ExamsModule,    // Exam creation and management
+    SessionsModule, // Live classroom sessions
+    RealtimeModule, // WebSockets/Socket.IO logic
+    ReportsModule,  // Statistics and performance reporting
   ],
 })
 export class AppModule {}

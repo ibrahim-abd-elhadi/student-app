@@ -18,6 +18,10 @@ import type { Server as SocketIoServer } from 'socket.io';
 
 interface SocketUser extends JwtClaims {}
 
+/**
+ * ControlGateway handles all real-time communication via WebSockets (Socket.IO).
+ * It manages student presence, tutor commands (lock/unlock), and exam progress synchronization.
+ */
 @WebSocketGateway({
   cors: { origin: true, credentials: true },
   transports: ['websocket'],
@@ -42,19 +46,30 @@ export class ControlGateway
     return this.ioProvider.getIo();
   }
 
+  /**
+   * Called when a new client connects.
+   * Performs JWT authentication and joins the socket to relevant rooms.
+   */
   async handleConnection(socket: Socket): Promise<void> {
     try {
+      // Extract token from handshake auth or headers
       const token =
         (socket.handshake.auth?.token as string) ||
         this.extractBearer(socket.handshake.headers.authorization);
       if (!token) throw new Error('missing_token');
+      
+      // Verify JWT and attach claims to socket data
       const claims = await this.auth.verifyAccessToken(token);
       (socket.data as { user: SocketUser }).user = claims;
 
+      // Join rooms for targeted broadcasting
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
 
+      // Mark user as online in the presence service
       await this.presence.markOnline(claims.sub);
+      
+      // Notify other classroom members about the new connection (if student)
       if (claims.role === 'STUDENT') {
         this.io
           .to(`classroom:${claims.classroom_id}`)
@@ -71,10 +86,16 @@ export class ControlGateway
     }
   }
 
+  /**
+   * Called when a client disconnects.
+   * Updates presence and notifies the classroom.
+   */
   async handleDisconnect(socket: Socket): Promise<void> {
     const user = (socket.data as { user?: SocketUser }).user;
     if (!user) return;
+    
     await this.presence.markOffline(user.sub);
+    
     if (user.role === 'STUDENT') {
       this.io.to(`classroom:${user.classroom_id}`).emit('presence:update', {
         user_id: user.sub,
@@ -85,6 +106,11 @@ export class ControlGateway
     this.log.log(`Disconnected ${user.username}`);
   }
 
+  /* ---------- Tutor → Server commands ---------- */
+
+  /**
+   * Command from Tutor to lock specific student screens.
+   */
   @SubscribeMessage('student:lock')
   handleLock(
     @ConnectedSocket() socket: Socket,
@@ -94,6 +120,7 @@ export class ControlGateway
     const cls = this.userOf(socket).classroom_id;
     let dispatched = 0;
     for (const sid of body.student_ids) {
+      // Security: verify each student belongs to the tutor's classroom
       const room = `student:${sid}`;
       const sockets = this.io.sockets.adapter.rooms.get(room);
       if (!sockets) continue;
@@ -109,6 +136,9 @@ export class ControlGateway
     return { ok: true, dispatched };
   }
 
+  /**
+   * Command from Tutor to unlock specific student screens.
+   */
   @SubscribeMessage('student:unlock')
   handleUnlock(
     @ConnectedSocket() socket: Socket,
@@ -146,6 +176,10 @@ export class ControlGateway
     return { ok: true };
   }
 
+  /**
+   * Student reports a question answer.
+   * Incremental updates are broadcasted to the classroom (Tutor).
+   */
   @SubscribeMessage('answer:upsert')
   async handleAnswerUpsert(
     @ConnectedSocket() socket: Socket,
@@ -167,6 +201,8 @@ export class ControlGateway
         choice_id: body.choice_id,
         client_seq: body.client_seq,
       });
+      
+      // Notify tutor about student progress
       this.io.to(`classroom:${u.classroom_id}`).emit('attempt:progress', {
         session_id: body.session_id,
         student_id: u.sub,
@@ -178,6 +214,9 @@ export class ControlGateway
     }
   }
 
+  /**
+   * Student submits their exam final answers.
+   */
   @SubscribeMessage('exam:submit')
   async handleSubmit(
     @ConnectedSocket() socket: Socket,
@@ -188,6 +227,8 @@ export class ControlGateway
     try {
       const r = await this.attempts.submit(u.sub, body.session_id);
       const submitted_at = new Date().toISOString();
+      
+      // Notify classroom about the submission
       this.io.to(`classroom:${u.classroom_id}`).emit('attempt:submitted', {
         session_id: body.session_id,
         student_id: u.sub,
@@ -200,6 +241,9 @@ export class ControlGateway
     }
   }
 
+  /**
+   * Handles resync request from student (e.g. after network drop).
+   */
   @SubscribeMessage('attempt:resync')
   async handleResync(
     @ConnectedSocket() socket: Socket,
@@ -215,6 +259,9 @@ export class ControlGateway
     }
   }
 
+  /**
+   * Student reports their current state (active window, lock status, suspicious activity).
+   */
   @SubscribeMessage('state:report')
   handleStateReport(
     @ConnectedSocket() socket: Socket,
@@ -230,6 +277,12 @@ export class ControlGateway
     return { ok: true };
   }
 
+  /* ---------- External fan-out helpers (called from controllers/scheduler) ---------- */
+
+  /**
+   * Send the exam payload to each assigned student.
+   * Called when a session is started.
+   */
   broadcastSessionAssigned(started: StartedSession): void {
     for (const a of started.attempts) {
       this.io.to(`student:${a.student_id}`).emit('exam:assigned', {
@@ -240,6 +293,9 @@ export class ControlGateway
     }
   }
 
+  /**
+   * Notify all members that a session has been closed.
+   */
   broadcastSessionClosed(
     classroomId: string,
     sessionId: string,
@@ -256,12 +312,16 @@ export class ControlGateway
     });
   }
 
+  /* ---------- Helpers ---------- */
+
+  /** Helper to get authenticated user claims from socket */
   private userOf(socket: Socket): SocketUser {
     const u = (socket.data as { user?: SocketUser }).user;
     if (!u) throw new Error('unauthenticated');
     return u;
   }
 
+  /** Helper to enforce role-based access control on WS messages */
   private requireRole(socket: Socket, role: UserRole): void {
     const u = this.userOf(socket);
     if (u.role !== role) {
@@ -269,6 +329,7 @@ export class ControlGateway
     }
   }
 
+  /** Helper to extract Bearer token from Authorization header */
   private extractBearer(h?: string): string | null {
     if (!h) return null;
     const m = /^Bearer\s+(.+)$/i.exec(h);

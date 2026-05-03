@@ -3,6 +3,7 @@ import * as path from 'path';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import * as os from 'os';
 
+// Optimization: Disable hardware acceleration for better compatibility in restricted environments
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 
@@ -11,11 +12,13 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = 'true';
 const isDev = !app.isPackaged;
 const DEV_BASE_URL = 'http://localhost:5174';
 
+// Window references
 let loginWin: BrowserWindow | null = null;
 let mainWin: BrowserWindow | null = null;
 let examWin: BrowserWindow | null = null;
 let lockWin: BrowserWindow | null = null;
 
+// Persistence: Store session data in a JSON file within the app's data directory
 const stateFile = path.join(app.getPath('userData'), 'session.json');
 
 interface Session {
@@ -25,6 +28,9 @@ interface Session {
   user: { id: string; display_name: string; classroom_id: string };
 }
 
+/**
+ * Load session from disk.
+ */
 function loadSession(): Session | null {
   try {
     if (!existsSync(stateFile)) return null;
@@ -34,6 +40,9 @@ function loadSession(): Session | null {
   }
 }
 
+/**
+ * Save session to disk.
+ */
 function saveSession(s: Session | null) {
   if (s) writeFileSync(stateFile, JSON.stringify(s), 'utf8');
 }
@@ -68,6 +77,9 @@ function getLockURL(msg?: string) {
   return base + params;
 }
 
+/**
+ * Creates the initial login window.
+ */
 function createLoginWindow() {
   if (loginWin) return loginWin.focus();
 
@@ -95,6 +107,9 @@ function createLoginWindow() {
   loginWin.on('closed', () => { loginWin = null; });
 }
 
+/**
+ * Creates the main application window (exam host).
+ */
 function createMainWindow() {
   if (mainWin) {
     mainWin.show();
@@ -228,6 +243,8 @@ ipcMain.handle('exam:close', async () => {
 
 // ===================== App Lifecycle =====================
 
+/* ---------- App lifecycle ---------- */
+
 app.whenReady().then(() => {
   console.log('[main] App ready, creating login window');
   createLoginWindow();
@@ -237,6 +254,10 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // On macOS it is common for applications and their menu bar to stay active until the user quits explicitly
   if (process.platform !== 'darwin' && !mainWin) app.quit();
 });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => {
+  // Clean up all global shortcuts on exit
+  globalShortcut.unregisterAll();
+});
