@@ -6,6 +6,11 @@ export async function login(baseUrl: string, username: string, password: string)
   return data;
 }
 
+export async function refreshToken(baseUrl: string, refresh_token: string) {
+  const { data } = await axios.post(`${baseUrl}/api/v1/auth/refresh`, { refresh_token });
+  return data;
+}
+
 export async function listMyAttempts(
   baseUrl: string,
   accessToken: string,
@@ -14,4 +19,20 @@ export async function listMyAttempts(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   return data;
+}
+
+export function decodeJwt(token: string): { exp?: number } | null {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
+  }
 }

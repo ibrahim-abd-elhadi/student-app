@@ -1,37 +1,60 @@
-/**
- * Host runtime: holds the WebSocket connection in the hidden main window and
- * forwards lock/exam events to the Electron main process via the preload bridge.
- *
- * This file is loaded in the login renderer when `?mode=host` is set.
- */
 import { io, Socket } from 'socket.io-client';
+import { refreshToken, decodeJwt } from './api';
 
 let socket: Socket | null = null;
 
 export async function startHost() {
   const studentApi = (window as any).studentApi;
-  const session = await studentApi.getSession();
-  if (!session) return;
+  let session = await studentApi.getSession();
+  if (!session) {
+    console.error('[host] No session found');
+    return;
+  }
 
-  socket = io(`${session.base_url}/ws`, {
+  // Refresh token if nearly expired
+  const payload = decodeJwt(session.access_token);
+  const now = Math.floor(Date.now() / 1000);
+  if (payload?.exp && payload.exp < now + 30) {
+    console.log('[host] Token expired, refreshing...');
+    try {
+      const newData = await refreshToken(session.base_url, session.refresh_token);
+      const updatedSession = {
+        base_url: session.base_url,
+        access_token: newData.access_token,
+        refresh_token: newData.refresh_token,
+        user: newData.user,
+      };
+      await studentApi.loginComplete(updatedSession);
+      session = updatedSession;
+      console.log('[host] Token refreshed');
+    } catch (err) {
+      console.warn('[host] Token refresh failed, using current token', err);
+    }
+  }
+
+  const token = session.access_token;
+  console.log('[host] Connecting WebSocket, token length:', token.length);
+
+  socket = io(`${session.base_url}`, {
     transports: ['websocket'],
-    auth: { token: session.access_token },
+    auth: { token },
     reconnection: true,
     reconnectionDelay: 500,
     reconnectionDelayMax: 5_000,
   });
 
   socket.on('connect', async () => {
-    // eslint-disable-next-line no-console
-    console.log('[host] connected');
-    if (studentApi?.hostReady) {
-      await studentApi.hostReady();
-    }
+    console.log('[host] ✅ Socket connected');
+    if (studentApi?.hostReady) await studentApi.hostReady();
     socket?.emit('student:ready');
   });
-  socket.on('disconnect', (r) => {
-    // eslint-disable-next-line no-console
-    console.warn('[host] disconnected', r);
+
+  socket.on('connect_error', (err: Error) => {
+    console.error('[host] ❌ Socket error:', err.message);
+  });
+
+  socket.on('disconnect', (reason: string) => {
+    console.warn('[host] Disconnected:', reason);
   });
 
   socket.on('lock:apply', async (p: { message?: string }) => {
@@ -40,22 +63,16 @@ export async function startHost() {
   socket.on('lock:release', async () => {
     await studentApi.releaseLock();
   });
-
-  socket.on('exam:assigned', async (p: any) => {
-    await studentApi.openExam(p);
+  socket.on('exam:assigned', async (payload: any) => {
+    await studentApi.openExam(payload);
   });
-
-  socket.on('exam:closed', async (p: any) => {
-    // eslint-disable-next-line no-console
-    console.log('[host] exam closed', p);
+  socket.on('exam:closed', async () => {
     await studentApi.closeExam();
   });
-
   socket.on('exam:cancelled', async () => {
     await studentApi.closeExam();
   });
 
-  // Expose the socket to the exam window via window-shared singleton.
   (window as any).__studentSocket = socket;
 }
 

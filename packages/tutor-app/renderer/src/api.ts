@@ -103,13 +103,25 @@ export class ApiClient {
     const s = this.session;
     if (!s) throw new Error('no_session');
     if (this.socket?.connected) return this.socket;
-    this.socket = io(`${this.baseUrl}/ws`, {
+
+    // Important: no /ws in the URL
+    this.socket = io(`${this.baseUrl}`, {
       transports: ['websocket'],
       auth: { token: s.access_token },
       reconnection: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 5_000,
     });
+
+    // Log success or failure
+    this.socket.on('connect', () => {
+      console.log('✅ Tutor socket connected');
+    });
+
+    this.socket.on('connect_error', (err) => {
+      console.error('❌ Tutor socket error:', err.message);
+    });
+
     return this.socket;
   }
 }

@@ -14,9 +14,20 @@ export function DashboardView() {
   const selectAllOnline = useApp((s) => s.selectAllOnline);
   const setView = useApp((s) => s.setView);
 
+  // Fetch roster initially and after socket reconnects
   useEffect(() => {
-    void api.listStudents(user.classroom_id).then(setRoster);
-    const sock = api.connectSocket();
+    let sock = api.connectSocket();
+    
+
+    const refreshRoster = () => {
+      void api.listStudents(user.classroom_id).then(setRoster);
+    };
+    
+
+    refreshRoster(); // initial fetch
+
+    sock.on('connect', refreshRoster); // refresh on reconnect
+
     sock.on('presence:update', (p: any) =>
       upsertPresence(p.user_id, p.online, p.last_seen_at, p.ready),
     );
@@ -26,7 +37,9 @@ export function DashboardView() {
         suspicious: p.suspicious,
       }),
     );
+
     return () => {
+      sock.off('connect', refreshRoster);
       sock.off('presence:update');
       sock.off('student:state');
     };

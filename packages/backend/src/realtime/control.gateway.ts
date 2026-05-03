@@ -5,20 +5,21 @@ import {
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
-  WebSocketServer,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
-import type { Server, Socket } from 'socket.io';
+import type { Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { PresenceService } from './presence.service';
 import { SessionsService, StartedSession } from '../sessions/sessions.service';
 import { AttemptsService } from '../sessions/attempts.service';
 import type { JwtClaims, UserRole } from '@classroom/shared';
+import { SocketIoProvider } from './socket-io.provider';
+import type { Server as SocketIoServer } from 'socket.io';
 
 interface SocketUser extends JwtClaims {}
 
 @WebSocketGateway({
-  namespace: '/ws',
+  // no namespace – use default "/"
   cors: { origin: true, credentials: true },
   transports: ['websocket'],
   pingInterval: 5_000,
@@ -29,17 +30,18 @@ export class ControlGateway
 {
   private readonly log = new Logger('ControlGateway');
 
-  @WebSocketServer()
-  io!: Server;
-
   constructor(
     private readonly auth: AuthService,
     private readonly presence: PresenceService,
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
+    private readonly ioProvider: SocketIoProvider,
   ) {}
 
-  /* ---------- Connection lifecycle ---------- */
+  // Getter that retrieves the server when needed (after startup)
+  private get io(): SocketIoServer {
+    return this.ioProvider.getIo();
+  }
 
   async handleConnection(socket: Socket): Promise<void> {
     try {
@@ -84,8 +86,6 @@ export class ControlGateway
     this.log.log(`Disconnected ${user.username}`);
   }
 
-  /* ---------- Tutor → Server commands ---------- */
-
   @SubscribeMessage('student:lock')
   handleLock(
     @ConnectedSocket() socket: Socket,
@@ -95,7 +95,6 @@ export class ControlGateway
     const cls = this.userOf(socket).classroom_id;
     let dispatched = 0;
     for (const sid of body.student_ids) {
-      // Defense in depth: we trust the tutor's classroom_id, not the client-provided ids.
       const room = `student:${sid}`;
       const sockets = this.io.sockets.adapter.rooms.get(room);
       if (!sockets) continue;
@@ -134,8 +133,6 @@ export class ControlGateway
     }
     return { ok: true, dispatched };
   }
-
-  /* ---------- Student → Server events ---------- */
 
   @SubscribeMessage('student:ready')
   handleStudentReady(@ConnectedSocket() socket: Socket) {
@@ -234,9 +231,6 @@ export class ControlGateway
     return { ok: true };
   }
 
-  /* ---------- External fan-out helpers (called from controllers/scheduler) ---------- */
-
-  /** Send the exam payload to each assigned student. */
   broadcastSessionAssigned(started: StartedSession): void {
     for (const a of started.attempts) {
       this.io.to(`student:${a.student_id}`).emit('exam:assigned', {
@@ -257,14 +251,11 @@ export class ControlGateway
       reason,
       state: 'CLOSED',
     });
-    // Tell students this session is over (so they tear down the exam window).
     this.io.to(`classroom:${classroomId}`).emit('exam:closed', {
       session_id: sessionId,
       reason,
     });
   }
-
-  /* ---------- Helpers ---------- */
 
   private userOf(socket: Socket): SocketUser {
     const u = (socket.data as { user?: SocketUser }).user;
