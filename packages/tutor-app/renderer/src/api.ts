@@ -1,131 +1,52 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
-import { io, Socket } from 'socket.io-client';
+import axios from 'axios';
 
-const STORAGE_KEY = 'classroom.tutor.session';
-
-interface StoredSession {
-  access_token: string;
-  refresh_token: string;
-  user: {
-    id: string;
-    username: string;
-    display_name: string;
-    role: string;
-    classroom_id: string;
-  };
+// Local type definitions to avoid @classroom/shared dependency
+export interface StudentAttemptSummary {
+  attempt_id: string;
+  exam_id: string;
+  exam_title: string;
+  state: 'ASSIGNED' | 'IN_PROGRESS' | 'SUBMITTED' | 'EXPIRED' | 'CANCELLED';
+  score: number | null;
+  total_points: number | null;
+  started_at: string | null;
+  submitted_at: string | null;
+  created_at: string;
 }
 
-export class ApiClient {
-  private rest: AxiosInstance;
-  socket: Socket | null = null;
+export type AttemptState = StudentAttemptSummary['state'];
 
-  constructor(public baseUrl: string) {
-    this.rest = axios.create({ baseURL: `${baseUrl}/api/v1` });
-    this.rest.interceptors.request.use((cfg) => {
-      const s = this.session;
-      if (s) cfg.headers.Authorization = `Bearer ${s.access_token}`;
-      return cfg;
-    });
-    this.rest.interceptors.response.use(
-      (r) => r,
-      async (err: AxiosError) => {
-        if (err.response?.status === 401 && this.session) {
-          try {
-            await this.refresh();
-            const cfg = err.config!;
-            cfg.headers!.Authorization = `Bearer ${this.session!.access_token}`;
-            return this.rest.request(cfg);
-          } catch {
-            this.logout();
-          }
-        }
-        throw err;
-      },
+export async function login(baseUrl: string, username: string, password: string) {
+  const { data } = await axios.post(`${baseUrl}/api/v1/auth/login`, { username, password });
+  return data;
+}
+
+export async function refreshToken(baseUrl: string, refresh_token: string) {
+  const { data } = await axios.post(`${baseUrl}/api/v1/auth/refresh`, { refresh_token });
+  return data;
+}
+
+export async function listMyAttempts(
+  baseUrl: string,
+  accessToken: string,
+): Promise<StudentAttemptSummary[]> {
+  const { data } = await axios.get(`${baseUrl}/api/v1/me/attempts`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  return data;
+}
+
+export function decodeJwt(token: string): { exp?: number } | null {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
     );
-  }
-
-  get session(): StoredSession | null {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as StoredSession) : null;
-  }
-
-  private setSession(s: StoredSession | null) {
-    if (s) localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-    else localStorage.removeItem(STORAGE_KEY);
-  }
-
-  async login(username: string, password: string): Promise<StoredSession> {
-    const { data } = await this.rest.post('/auth/login', { username, password });
-    this.setSession(data);
-    return data;
-  }
-
-  async refresh(): Promise<void> {
-    const s = this.session;
-    if (!s) throw new Error('no_session');
-    const { data } = await axios.post(`${this.baseUrl}/api/v1/auth/refresh`, {
-      refresh_token: s.refresh_token,
-    });
-    this.setSession(data);
-  }
-
-  logout(): void {
-    const s = this.session;
-    if (s) {
-      axios
-        .post(`${this.baseUrl}/api/v1/auth/logout`, { refresh_token: s.refresh_token })
-        .catch(() => undefined);
-    }
-    this.setSession(null);
-    this.socket?.disconnect();
-    this.socket = null;
-  }
-
-  /* ----- Domain ----- */
-  listStudents(classroomId: string) {
-    return this.rest.get(`/classrooms/${classroomId}/students`).then((r) => r.data);
-  }
-  listExams() { return this.rest.get('/exams').then((r) => r.data); }
-  getExam(id: string) { return this.rest.get(`/exams/${id}`).then((r) => r.data); }
-  createSession(body: { exam_id: string; student_ids: string[]; duration_minutes: number }) {
-    return this.rest.post('/sessions', body).then((r) => r.data);
-  }
-  startSession(id: string) { return this.rest.post(`/sessions/${id}/start`).then((r) => r.data); }
-  stopSession(id: string) { return this.rest.post(`/sessions/${id}/stop`).then((r) => r.data); }
-  getSession(id: string) { return this.rest.get(`/sessions/${id}`).then((r) => r.data); }
-  getReport(id: string) { return this.rest.get(`/sessions/${id}/report.json`).then((r) => r.data); }
-  getReportHtml(id: string) {
-    return this.rest.get(`/sessions/${id}/report.html`, { responseType: 'text' }).then((r) => r.data as string);
-  }
-
-  /* ----- Realtime ----- */
-  connectSocket(): Socket {
-    const s = this.session;
-    if (!s) throw new Error('no_session');
-    if (this.socket?.connected) return this.socket;
-
-    // Important: no /ws in the URL
-    this.socket = io(`${this.baseUrl}`, {
-      transports: ['websocket'],
-      auth: { token: s.access_token },
-      reconnection: true,
-      reconnectionDelay: 500,
-      reconnectionDelayMax: 5_000,
-    });
-
-    // Log success or failure
-    this.socket.on('connect', () => {
-      console.log('✅ Tutor socket connected');
-    });
-
-    this.socket.on('connect_error', (err) => {
-      console.error('❌ Tutor socket error:', err.message);
-    });
-
-    return this.socket;
+    return JSON.parse(jsonPayload);
+  } catch {
+    return null;
   }
 }
-
-export const api = new ApiClient(
-  (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://127.0.0.1:8080',
-);

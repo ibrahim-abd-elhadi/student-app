@@ -1,205 +1,182 @@
-import React, { useEffect } from 'react';
-import { api } from '../api';
-import { useApp } from '../store';
+import React, { useEffect, useMemo, useState } from 'react';
+import ReactDOM from 'react-dom/client';
+import { listMyAttempts } from './api';
+import type { StudentAttemptSummary, AttemptState } from './api';
+import './styles.css';
 
-export function DashboardView() {
-  const user = useApp((s) => s.user)!;
+interface Session {
+  base_url: string;
+  access_token: string;
+  refresh_token: string;
+  user: { id: string; display_name: string; classroom_id: string };
+}
 
-  const roster = useApp((s) => s.roster);
-  const setRoster = useApp((s) => s.setRoster);
+const STATE_LABEL: Record<AttemptState, string> = {
+  ASSIGNED: 'لم يبدأ',
+  IN_PROGRESS: 'جارٍ',
+  SUBMITTED: 'مُسلَّم',
+  EXPIRED: 'منتهٍ',
+  CANCELLED: 'ملغى',
+};
 
-  const upsertPresence = useApp((s) => s.upsertPresence);
-  const upsertStudentState = useApp((s) => s.upsertStudentState);
+function pct(score: number | null, total: number | null): string {
+  if (score == null || total == null || total === 0) return '—';
+  return `${Math.round((score / total) * 100)}%`;
+}
 
-  const selected = useApp((s) => s.selectedStudentIds);
-  const toggleStudent = useApp((s) => s.toggleStudent);
-  const clearSelection = useApp((s) => s.clearSelection);
-  const selectAllOnline = useApp((s) => s.selectAllOnline);
+function fmtDate(iso: string | null): string {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString('ar');
+  } catch {
+    return iso;
+  }
+}
 
-  const setView = useApp((s) => s.setView);
+function Stats({ rows }: { rows: StudentAttemptSummary[] }) {
+  const submitted = rows.filter((r) => r.state === 'SUBMITTED');
+  const totalTaken = submitted.length;
+  const ratios = submitted
+    .map((r) =>
+      r.score != null && r.total_points && r.total_points > 0
+        ? r.score / r.total_points
+        : null,
+    )
+    .filter((x): x is number => x != null);
+  const avg =
+    ratios.length === 0
+      ? null
+      : ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  const best = ratios.length === 0 ? null : Math.max(...ratios);
+
+  return (
+    <div className="stats">
+      <div className="stat">
+        <div className="stat-value">{totalTaken}</div>
+        <div className="stat-label">اختبارات مُسلَّمة</div>
+      </div>
+      <div className="stat">
+        <div className="stat-value">
+          {avg == null ? '—' : `${Math.round(avg * 100)}%`}
+        </div>
+        <div className="stat-label">المتوسط</div>
+      </div>
+      <div className="stat">
+        <div className="stat-value">
+          {best == null ? '—' : `${Math.round(best * 100)}%`}
+        </div>
+        <div className="stat-label">أعلى نتيجة</div>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [rows, setRows] = useState<StudentAttemptSummary[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [readying, setReadying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const loadData = async () => {
+    try {
+      const s = (await window.studentApi.getSession()) as Session | null;
+      if (!s) {
+        setErr('لا توجد جلسة. الرجاء تسجيل الدخول مجدداً.');
+        return;
+      }
+      setSession(s);
+      const list = await listMyAttempts(s.base_url, s.access_token);
+      setRows(list);
+      setErr(null);
+    } catch (e: any) {
+      setErr(e?.response?.data?.message ?? e?.message ?? 'فشل التحميل');
+    }
+  };
 
   useEffect(() => {
-    const sock = api.connectSocket();
+    loadData();
+  }, []);
 
-    const refreshRoster = async () => {
-      try {
-        const list = await api.listStudents(user.classroom_id);
-        setRoster(list);
-      } catch (err) {
-        console.error('Roster fetch failed:', err);
-      }
-    };
+  const recent = useMemo(() => (rows ?? []).slice(0, 10), [rows]);
 
-    refreshRoster();
-
-    sock.on('connect', () => {
-      console.log('✅ Tutor socket connected:', sock.id);
-      refreshRoster();
-    });
-
-    sock.on('disconnect', () => {
-      console.log('❌ Tutor socket disconnected');
-    });
-
-    sock.on('connect_error', (err) => {
-      console.error('Socket connect error:', err.message);
-    });
-
-    sock.on('presence:update', (p: any) => {
-      console.log('presence:update =>', p);
-
-      upsertPresence(
-        p.user_id,
-        p.online,
-        p.last_seen_at ?? null,
-        p.ready ?? false
-      );
-    });
-
-    sock.on('student:state', (p: any) => {
-      console.log('student:state =>', p);
-
-      upsertStudentState(p.student_id, {
-        locked: p.locked,
-        suspicious: p.suspicious,
-      });
-    });
-
-    return () => {
-      sock.off('connect');
-      sock.off('disconnect');
-      sock.off('connect_error');
-      sock.off('presence:update');
-      sock.off('student:state');
-    };
-  }, [user.classroom_id]);
-
-  function lock() {
-    if (selected.size === 0) return;
-
-    api.connectSocket().emit('student:lock', {
-      student_ids: [...selected],
-      message: 'تم قفل الجهاز من قبل المعلّم',
-    });
+  async function ready() {
+    setReadying(true);
+    try {
+      await window.studentApi.dashboardReady();
+    } finally {
+      setReadying(false);
+    }
   }
 
-  function unlock() {
-    if (selected.size === 0) return;
-
-    api.connectSocket().emit('student:unlock', {
-      student_ids: [...selected],
-    });
+  async function refresh() {
+    setRefreshing(true);
+    await loadData();
+    setRefreshing(false);
   }
 
   return (
-    <>
-      <div className="toolbar">
-        <button onClick={selectAllOnline}>
-          تحديد المتصلين
-        </button>
+    <div className="dash">
+      <header className="dash-header">
+        <div>
+          <h1>أهلاً، {session?.user.display_name ?? '...'}</h1>
+          <div className="muted">لوحة الطالب</div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={refresh} disabled={refreshing}>
+            {refreshing ? '...' : 'تحديث'}
+          </button>
+          <button onClick={ready} disabled={readying}>
+            {readying ? '...' : 'استعداد'}
+          </button>
+        </div>
+      </header>
 
-        <button
-          className="secondary"
-          onClick={clearSelection}
-        >
-          إلغاء التحديد
-        </button>
+      {err && <div className="error">{err}</div>}
 
-        <button
-          onClick={lock}
-          disabled={selected.size === 0}
-        >
-          قفل الأجهزة
-        </button>
+      {rows != null && <Stats rows={rows} />}
 
-        <button
-          className="secondary"
-          onClick={unlock}
-          disabled={selected.size === 0}
-        >
-          فك القفل
-        </button>
-
-        <button
-          className="danger"
-          onClick={() => setView('launch')}
-          disabled={selected.size === 0}
-        >
-          بدء اختبار للمحددين ({selected.size})
-        </button>
-      </div>
-
-      <div className="grid">
-        {roster.map((s: any) => (
-          <div
-            key={s.id}
-            className={`card tile ${
-              selected.has(s.id) ? 'selected' : ''
-            }`}
-            onClick={() => toggleStudent(s.id)}
-          >
-            <div>
-              <span
-                className={`dot ${
-                  s.online ? 'online' : 'offline'
-                }`}
-              />
-
-              <strong>{s.display_name}</strong>
-            </div>
-
-            <div className="muted">
-              @{s.username}
-            </div>
-
-            <div className="muted">
-              {s.online
-                ? s.ready
-                  ? 'متصل — في الانتظار'
-                  : 'متصل'
-                : s.last_seen_at
-                ? `آخر ظهور: ${new Date(
-                    s.last_seen_at
-                  ).toLocaleString('ar')}`
-                : 'غير متصل'}
-            </div>
-
-            {s.ready &&
-              s.online &&
-              !s.locked && (
-                <div
-                  style={{
-                    color: '#0f766e',
-                  }}
-                >
-                  ● نشط ومنتظر المعلّم
-                </div>
-              )}
-
-            {s.locked && (
-              <div
-                style={{
-                  color: '#fbbf24',
-                }}
-              >
-                ● مقفول
-              </div>
-            )}
-
-            {s.suspicious && (
-              <div className="error">
-                ⚠ نشاط مشبوه
-              </div>
-            )}
-          </div>
-        ))}
-
-        {roster.length === 0 && (
-          <div className="muted">
-            لا يوجد طلاب في هذا الصف.
-          </div>
+      <section className="card" style={{ marginTop: 16 }}>
+        <h2 style={{ marginTop: 0 }}>آخر المحاولات</h2>
+        {rows == null && !err && <div className="muted">جارٍ التحميل…</div>}
+        {rows != null && rows.length === 0 && (
+          <div className="muted">لا توجد محاولات بعد.</div>
         )}
-      </div>
-    </>
+        {recent.length > 0 && (
+          <table className="dash-table">
+            <thead>
+              <tr>
+                <th>الاختبار</th>
+                <th>التاريخ</th>
+                <th>الحالة</th>
+                <th>النتيجة</th>
+                <th>النسبة</th>
+               </tr>
+            </thead>
+            <tbody>
+              {recent.map((r) => (
+                <tr key={r.attempt_id}>
+                  <td>{r.exam_title}</td>
+                  <td>{fmtDate(r.submitted_at ?? r.started_at ?? r.created_at)}</td>
+                  <td>{STATE_LABEL[r.state]}</td>
+                  <td>
+                    {r.score == null
+                      ? '—'
+                      : `${r.score}${r.total_points != null ? ` / ${r.total_points}` : ''}`}
+                  </td>
+                  <td>{pct(r.score, r.total_points)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+
+      <p className="muted" style={{ marginTop: 16 }}>
+        عند الضغط على «استعداد» سيُخفى التطبيق في الخلفية بانتظار أوامر المعلّم.
+      </p>
+    </div>
   );
 }
+
+ReactDOM.createRoot(document.getElementById('root')!).render(<Dashboard />);

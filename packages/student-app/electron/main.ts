@@ -3,7 +3,7 @@ import * as path from 'path';
 import { writeFileSync, readFileSync, existsSync } from 'fs';
 import * as os from 'os';
 
-// Optimization: Disable hardware acceleration for better compatibility in restricted environments
+// Optimization: Disable hardware acceleration for better compatibility
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-gpu');
 
@@ -18,7 +18,7 @@ let mainWin: BrowserWindow | null = null;
 let examWin: BrowserWindow | null = null;
 let lockWin: BrowserWindow | null = null;
 
-// Persistence: Store session data in a JSON file within the app's data directory
+// Persistence
 const stateFile = path.join(app.getPath('userData'), 'session.json');
 
 interface Session {
@@ -28,9 +28,6 @@ interface Session {
   user: { id: string; display_name: string; classroom_id: string };
 }
 
-/**
- * Load session from disk.
- */
 function loadSession(): Session | null {
   try {
     if (!existsSync(stateFile)) return null;
@@ -40,30 +37,27 @@ function loadSession(): Session | null {
   }
 }
 
-/**
- * Save session to disk.
- */
 function saveSession(s: Session | null) {
   if (s) writeFileSync(stateFile, JSON.stringify(s), 'utf8');
+  else if (existsSync(stateFile)) {
+    try { writeFileSync(stateFile, '', 'utf8'); } catch {}
+  }
 }
 
 function getPreloadPath() {
   return path.join(__dirname, 'preload.js');
 }
 
-/** This is the login page – the small window where the student enters credentials */
 function getLoginURL() {
   if (isDev) return `${DEV_BASE_URL}/login`;
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'login.html')}`;
 }
 
-/** This is the HOST page – the hidden window that maintains the WebSocket */
 function getMainAppURL() {
   if (isDev) return `${DEV_BASE_URL}/login?mode=host`;
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'login.html')}?mode=host`;
 }
 
-/** This is the exam page – full‑screen when the exam starts */
 function getExamURL() {
   if (isDev) return `${DEV_BASE_URL}/exam.html`;
   return `file://${path.join(__dirname, '..', 'dist-renderer', 'exam.html')}`;
@@ -77,9 +71,6 @@ function getLockURL(msg?: string) {
   return base + params;
 }
 
-/**
- * Creates the initial login window.
- */
 function createLoginWindow() {
   if (loginWin) return loginWin.focus();
 
@@ -107,9 +98,6 @@ function createLoginWindow() {
   loginWin.on('closed', () => { loginWin = null; });
 }
 
-/**
- * Creates the main application window (exam host).
- */
 function createMainWindow() {
   if (mainWin) {
     mainWin.show();
@@ -130,16 +118,11 @@ function createMainWindow() {
 
   if (isDev) mainWin.webContents.openDevTools();
 
-  mainWin.webContents.on('did-fail-load', (_, errorCode, errorDesc) => {
-    console.error(`Main window failed: ${errorDesc} (${errorCode})`);
-  });
-
   mainWin.loadURL(getMainAppURL()).catch(err => console.error('Main window load error:', err));
   mainWin.on('closed', () => { mainWin = null; });
 }
 
-// ===================== IPC Handlers =====================
-
+// IPC Handlers
 ipcMain.handle('login:complete', async (_, payload: Session) => {
   console.log('[main] login:complete');
   saveSession(payload);
@@ -155,9 +138,7 @@ ipcMain.handle('host:ready', async () => {
 });
 
 ipcMain.handle('session:get', async () => {
-  const s = loadSession();
-  console.log('[main] session:get', s ? 'found' : 'null');
-  return s;
+  return loadSession();
 });
 
 ipcMain.handle('host:info', () => ({ hostname: os.hostname(), platform: process.platform }));
@@ -171,14 +152,18 @@ ipcMain.handle('dashboard:ready', async () => {
 
 ipcMain.handle('lock:apply', async (_, msg: string) => {
   console.log('[main] lock:apply', msg);
+  
+  // Close any existing lock window first
   if (lockWin) {
-    lockWin.focus();
-    return;
+    lockWin.close();
+    lockWin = null;
   }
+  
   lockWin = new BrowserWindow({
     fullscreen: true,
     alwaysOnTop: true,
     frame: false,
+    skipTaskbar: true,
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,
@@ -186,9 +171,12 @@ ipcMain.handle('lock:apply', async (_, msg: string) => {
     },
   });
 
+  // Block common escape shortcuts
   globalShortcut.register('Alt+F4', () => {});
   globalShortcut.register('Ctrl+W', () => {});
   globalShortcut.register('Ctrl+Shift+Escape', () => {});
+  globalShortcut.register('Cmd+W', () => {});
+  globalShortcut.register('Escape', () => {});
 
   lockWin.loadURL(getLockURL(msg)).catch(console.error);
   lockWin.on('closed', () => {
@@ -208,10 +196,13 @@ ipcMain.handle('lock:release', async () => {
 
 ipcMain.handle('exam:open', async (_, payload: any) => {
   console.log('[main] exam:open', payload);
+  
+  // Close existing exam window
   if (examWin) {
-    examWin.focus();
-    return;
+    examWin.close();
+    examWin = null;
   }
+  
   examWin = new BrowserWindow({
     fullscreen: true,
     alwaysOnTop: true,
@@ -223,7 +214,6 @@ ipcMain.handle('exam:open', async (_, payload: any) => {
   });
 
   examWin.loadURL(getExamURL()).then(() => {
-    console.log('[main] exam window loaded, sending exam:start');
     examWin?.webContents.send('exam:start', payload);
   }).catch(err => console.error('[main] exam window load error:', err));
 
@@ -241,9 +231,14 @@ ipcMain.handle('exam:close', async () => {
   }
 });
 
-// ===================== App Lifecycle =====================
-
-/* ---------- App lifecycle ---------- */
+// Clean up on quit
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  if (examWin) examWin.close();
+  if (lockWin) lockWin.close();
+  if (mainWin) mainWin.close();
+  if (loginWin) loginWin.close();
+});
 
 app.whenReady().then(() => {
   console.log('[main] App ready, creating login window');
@@ -254,10 +249,5 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  // On macOS it is common for applications and their menu bar to stay active until the user quits explicitly
   if (process.platform !== 'darwin' && !mainWin) app.quit();
-});
-app.on('will-quit', () => {
-  // Clean up all global shortcuts on exit
-  globalShortcut.unregisterAll();
 });
