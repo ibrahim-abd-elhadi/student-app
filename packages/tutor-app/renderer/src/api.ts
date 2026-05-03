@@ -15,10 +15,19 @@ export interface StudentAttemptSummary {
 
 export type AttemptState = StudentAttemptSummary['state'];
 
-export async function login(baseUrl: string, username: string, password: string) {
-  const { data } = await axios.post(`${baseUrl}/api/v1/auth/login`, { username, password });
-  return data;
-}
+    this.socket = io(this.baseUrl, {
+      path: '/ws',
+      transports: ['websocket'],
+      auth: { token: s.access_token },
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionDelayMax: 5_000,
+    });
+
+    // Log success or failure
+    this.socket.on('connect', () => {
+      console.log('✅ Tutor socket connected');
+    });
 
 export async function refreshToken(baseUrl: string, refresh_token: string) {
   const { data } = await axios.post(`${baseUrl}/api/v1/auth/refresh`, { refresh_token });

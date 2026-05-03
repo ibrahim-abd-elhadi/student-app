@@ -3,6 +3,7 @@ import {
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
 } from '@nestjs/websockets';
@@ -18,18 +19,9 @@ import type { Server as SocketIoServer } from 'socket.io';
 
 interface SocketUser extends JwtClaims {}
 
-/**
- * ControlGateway handles all real-time communication via WebSockets (Socket.IO).
- * It manages student presence, tutor commands (lock/unlock), and exam progress synchronization.
- */
-@WebSocketGateway({
-  cors: { origin: true, credentials: true },
-  transports: ['websocket'],
-  pingInterval: 5_000,
-  pingTimeout: 10_000,
-})
+@WebSocketGateway()
 export class ControlGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   private readonly log = new Logger('ControlGateway');
 
@@ -39,18 +31,21 @@ export class ControlGateway
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
     private readonly ioProvider: SocketIoProvider,
-  ) {}
+  ) {
+    this.log.log('[Constructor] ControlGateway instantiated');
+  }
 
   // Getter that retrieves the server when needed (after startup)
   private get io(): SocketIoServer {
     return this.ioProvider.getIo();
   }
 
-  /**
-   * Called when a new client connects.
-   * Performs JWT authentication and joins the socket to relevant rooms.
-   */
+  afterInit(server: SocketIoServer) {
+    this.log.log('[afterInit] ControlGateway initialized with server, registering handlers');
+  }
+
   async handleConnection(socket: Socket): Promise<void> {
+    this.log.log(`[handleConnection] ✅ Socket connected: ${socket.id}`);
     try {
       // Extract token from handshake auth or headers
       const token =
@@ -65,12 +60,14 @@ export class ControlGateway
       // Join rooms for targeted broadcasting
       socket.join(`classroom:${claims.classroom_id}`);
       socket.join(`${claims.role.toLowerCase()}:${claims.sub}`);
+      this.log.log(`[handleConnection] Joined rooms: classroom:${claims.classroom_id}, ${claims.role.toLowerCase()}:${claims.sub}`);
 
       // Mark user as online in the presence service
       await this.presence.markOnline(claims.sub);
+      this.log.log(`[handleConnection] Marked ${claims.username} as online in presence`);
       
-      // Notify other classroom members about the new connection (if student)
       if (claims.role === 'STUDENT') {
+        this.log.log(`[handleConnection] Broadcasting presence:update for student ${claims.sub} to classroom:${claims.classroom_id}`);
         this.io
           .to(`classroom:${claims.classroom_id}`)
           .emit('presence:update', {
@@ -78,9 +75,11 @@ export class ControlGateway
             online: true,
             last_seen_at: new Date().toISOString(),
           });
+        this.log.log(`[handleConnection] ✅ Broadcasted presence:update`);
       }
-      this.log.log(`Connected ${claims.role} ${claims.username} (${claims.sub})`);
+      this.log.log(`✅ Connected ${claims.role} ${claims.username} (${claims.sub})`);
     } catch (err) {
+      this.log.error(`[handleConnection] ❌ Error: ${(err as Error).message}`, (err as Error).stack);
       this.log.warn(`Rejected WS connection: ${(err as Error).message}`);
       socket.disconnect(true);
     }

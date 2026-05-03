@@ -7,109 +7,104 @@ Production-grade scaffold of a tutor / student / exam-designer system. Built for
 
 ---
 
-## 🏗️ Repository Architecture
+```
+packages/
+  shared/          shared types + WS event definitions
+  backend/         NestJS REST + realtime gateway implementation
+  tutor-app/       Electron tutor controller app
+  student-app/     Electron student client with host/exam flow
+  designer-app/    Electron exam creation app
+infra/
+  docker-compose.yml
+  db/init/         Postgres init + seed SQL
+```
 
-This project is organized as a **Monorepo** using npm workspaces:
+## Features
 
-- **`packages/shared/`**: Single source of truth for TypeScript types, REST contracts, and WebSocket event signatures.
-- **`packages/backend/`**: NestJS API + Socket.IO gateway. Handles business logic, persistence, and real-time fan-out.
-- **`packages/tutor-app/`**: Electron controller for the teacher. Features student monitoring and classroom control.
-- **`packages/student-app/`**: Electron client with a hidden host window, fullscreen lock overlay, and kiosk-mode exam runner.
-- **`packages/designer-app/`**: Electron-based MCQ authoring tool for creating and managing exams.
-- **`infra/`**: Docker Compose configurations for PostgreSQL and Redis.
+- Tutor can see live student presence and status
+- Tutor can start/cancel exams for selected students
+- Student receives fullscreen exam window and lock overlay during tests
+- Student answers sync in real time and recover after reconnects
+- Persistent session state and automatic deadline enforcement
+- Central shared contract package for type-safe WS and REST interaction
 
----
+## Prerequisites
 
-## 🛠️ Prerequisites
+- Node.js **>= 20.10**
+- npm **>= 10**
+- Docker Desktop (for Postgres + Redis)
+- Windows 10/11 recommended for full Electron lock-overlay behavior
 
-- **Node.js**: `>= 20.10`
-- **npm**: `>= 10`
-- **Docker Desktop**: (Required for database and cache services)
-- **OS**: Windows 10/11 is recommended for full student-app lock capabilities.
-
----
+## Setup
 
 ## 🚀 Quick Start (Development)
 
 ### 1. Initialize Project
 ```bash
-# Install dependencies for the entire workspace
+# Install workspace dependencies
 npm install
 
-# Boot infrastructure (Postgres + Redis)
+# Start infrastructure
 npm run infra:up
 
-# Build shared package (Required for other packages to work)
+# Prepare backend env
+cp packages/backend/.env.example packages/backend/.env
+# Edit JWT_SECRET to a secure random string for non-local use
+
+# Build shared package
 npm -w @classroom/shared run build
+
+# Seed demo data
+npm run db:seed
 ```
 
-### 2. Environment Configuration
-Copy the example environment file in the backend package:
-```bash
-cp packages/backend/.env.example packages/backend/.env
-# Update JWT_SECRET in .env with a secure string
-```
+## Start the apps
 
 ### 3. Database Seeding
 Create initial dummy data (Tutor: `tutor1`, Student: `student1`, Password: `Password123!`):
 ```bash
-npm run db:seed
+# Backend (API + Socket.IO)
+npm run dev:backend
+
+# Tutor app
+npm run dev:tutor
+
+# Student app
+npm run dev:student
+
+# Designer app
+npm run dev:designer
 ```
 
----
+### Login credentials for local demo
 
-## 💻 Running the Application
+- Tutor: `tutor1` / `Password123!`
+- Students: `student1` / `Password123!`, `student2` / `Password123!`, `student3` / `Password123!`
 
-You will need 4 terminal instances:
+### Multiple student instances
 
-| Component | Command | Port / Info |
-|---|---|---|
-| **Backend** | `npm run dev:backend` | http://127.0.0.1:8080 |
-| **Tutor App** | `npm run dev:tutor` | Login: `tutor1` |
-| **Student App** | `npm run dev:student` | Login: `student1` |
-| **Designer App** | `npm run dev:designer` | Login: `tutor1` |
+Use a separate Electron user data folder so each student has isolated state:
 
----
+```powershell
+$env:ELECTRON_USER_DATA="$PWD\.userdata\student2"; npm run dev:student
+```
 
-## 🌿 Git Workflow & Best Practices
+## Quick start workflow
 
-Since this project is used for demonstrating Git/GitHub skills, please follow this workflow:
+1. Start the backend.
+2. Open the Tutor app and log in.
+3. Start one or more Student apps and log in as students.
+4. Confirm students appear online in the Tutor roster.
+5. Use the Tutor app to assign and start an exam.
+6. Verify the Student app opens the fullscreen exam window.
 
-### Branching Strategy
-- `main`: Production-ready code.
-- `develop`: Integration branch for new features.
-- `feature/feature-name`: Branch for specific feature development.
-- `fix/issue-name`: Branch for bug fixes.
+## Realtime behavior
 
-### Commit Guidelines
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-- `feat: ...` for new features.
-- `fix: ...` for bug fixes.
-- `docs: ...` for documentation changes.
-- `refactor: ...` for code changes that neither fix a bug nor add a feature.
-
-### Pull Requests
-1. Create a branch from `develop`.
-2. Push your changes.
-3. Open a Pull Request targeting `develop`.
-4. Ensure all tests pass and code is reviewed before merging.
-
----
-
-## 🔒 Security & Hardening
-
-- **JWT Auth**: Every request and WS handshake is validated.
-- **Helmet**: Secured HTTP headers.
-- **Kiosk Mode**: Student app uses Electron kiosk mode to prevent switching windows during exams.
-- **Validation**: Strict DTO validation using `class-validator` in the backend.
-
----
-
-## 📝 Troubleshooting
-
-- **Database Connection**: Ensure Docker is running and `POSTGRES_URL` in `.env` is correct.
-- **Shared Types**: If you see "Module not found" for `@classroom/shared`, run `npm -w @classroom/shared run build`.
-- **Student Lock**: If the student screen doesn't lock, ensure the Tutor app is connected to the same classroom ID.
+- Socket.IO connections are served on `/ws`
+- Clients authenticate with JWT during the handshake
+- Students are broadcast to tutors via `presence:update`
+- Tutor-to-student commands are routed through server-side rooms
+- Exam windows are opened on student clients via server push
 
 ---
 

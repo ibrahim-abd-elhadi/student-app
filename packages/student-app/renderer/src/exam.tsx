@@ -147,11 +147,7 @@ function ExamApp() {
     
     (async () => {
       const session = await window.studentApi.getSession();
-      if (!session || cancelled) {
-        setError('No session found. Please login again.');
-        return;
-      }
-      
+      if (!session || cancelled) return;
       s = io(session.base_url, {
         path: '/ws',
         transports: ['websocket'],
