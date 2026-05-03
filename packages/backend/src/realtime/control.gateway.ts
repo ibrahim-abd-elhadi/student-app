@@ -19,7 +19,6 @@ import type { Server as SocketIoServer } from 'socket.io';
 interface SocketUser extends JwtClaims {}
 
 @WebSocketGateway({
-  // no namespace – use default "/"
   cors: { origin: true, credentials: true },
   transports: ['websocket'],
   pingInterval: 5_000,

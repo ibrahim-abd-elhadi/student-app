@@ -11,11 +11,11 @@ export async function startHost() {
     return;
   }
 
-  // Refresh token if nearly expired
+  // Try refreshing token if nearly expired
   const payload = decodeJwt(session.access_token);
   const now = Math.floor(Date.now() / 1000);
   if (payload?.exp && payload.exp < now + 30) {
-    console.log('[host] Token expired, refreshing...');
+    console.log('[host] Refreshing token...');
     try {
       const newData = await refreshToken(session.base_url, session.refresh_token);
       const updatedSession = {
@@ -28,14 +28,14 @@ export async function startHost() {
       session = updatedSession;
       console.log('[host] Token refreshed');
     } catch (err) {
-      console.warn('[host] Token refresh failed, using current token', err);
+      console.warn('[host] Token refresh failed – trying with existing token');
     }
   }
 
   const token = session.access_token;
-  console.log('[host] Connecting WebSocket, token length:', token.length);
+  console.log('[host] Connecting to WebSocket...');
 
-  socket = io(`${session.base_url}`, {
+  socket = io(session.base_url, {
     transports: ['websocket'],
     auth: { token },
     reconnection: true,
