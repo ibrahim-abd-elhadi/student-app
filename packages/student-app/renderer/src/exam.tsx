@@ -21,8 +21,6 @@ interface ExamPayload {
   };
 }
 
-const STORAGE_KEY = 'classroom.student.attempt';
-
 interface PersistedAttempt {
   session_id: string;
   exam_id: string;
@@ -30,6 +28,16 @@ interface PersistedAttempt {
   answers: Record<string, string>;
   client_seq: number;
   exam_payload: ExamPayload['exam'];
+}
+
+const STORAGE_KEY = 'classroom.student.attempt';
+const PENDING_KEY = 'classroom.student.pending';
+
+interface PendingAnswer {
+  question_id: string;
+  choice_id: string;
+  client_seq: number;
+  timestamp: number;
 }
 
 function loadPersisted(sessionId: string): PersistedAttempt | null {
@@ -42,11 +50,27 @@ function loadPersisted(sessionId: string): PersistedAttempt | null {
     return null;
   }
 }
+
 function persist(p: PersistedAttempt) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
 }
+
 function clearPersisted() {
   localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(PENDING_KEY);
+}
+
+function loadPendingAnswers(): PendingAnswer[] {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingAnswers(answers: PendingAnswer[]) {
+  localStorage.setItem(PENDING_KEY, JSON.stringify(answers));
 }
 
 function ExamApp() {
@@ -59,8 +83,12 @@ function ExamApp() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [score, setScore] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const seqRef = useRef(0);
   const socketRef = useRef<Socket | null>(null);
+  const pendingAnswersRef = useRef<PendingAnswer[]>([]);
+  const flushTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const applyExamPayload = useCallback((p: ExamPayload) => {
     setPayload(p);
@@ -93,12 +121,35 @@ function ExamApp() {
     return off;
   }, [applyExamPayload]);
 
-  // Build socket. We can't rely on the host window's socket because we live
-  // in a separate BrowserWindow; we open our own connection using the same
-  // session token. Both sockets co-exist for the same user.
+  // Flush pending answers when connected
+  const flushPendingAnswers = useCallback(() => {
+    if (!socketRef.current?.connected || !payload) return;
+    
+    const pending = [...pendingAnswersRef.current];
+    if (pending.length === 0) return;
+    
+    // Sort by timestamp to preserve order
+    pending.sort((a, b) => a.timestamp - b.timestamp);
+    
+    for (const ans of pending) {
+      socketRef.current?.emit('answer:upsert', {
+        session_id: payload.session_id,
+        question_id: ans.question_id,
+        choice_id: ans.choice_id,
+        client_seq: ans.client_seq,
+      });
+    }
+    
+    // Keep only unconfirmed ones in a separate list (server will ack)
+    pendingAnswersRef.current = [];
+    savePendingAnswers([]);
+  }, [payload]);
+
+  // Build socket connection
   useEffect(() => {
     let s: Socket;
     let cancelled = false;
+    
     (async () => {
       const session = await window.studentApi.getSession();
       if (!session || cancelled) return;
@@ -106,46 +157,66 @@ function ExamApp() {
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,
-        reconnectionDelay: 500,
-        reconnectionDelayMax: 5_000,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 10_000,
+        reconnectionAttempts: 10,
       });
       socketRef.current = s;
+      
       s.on('connect', async () => {
         setConnected(true);
-        // Resync: fetch authoritative state and reconcile our seq.
+        setError(null);
+        
         if (payload) {
+          // Resync with server
           s.emit(
             'attempt:resync',
             { session_id: payload.session_id, last_client_seq: seqRef.current },
             (ack: any) => {
               if (ack?.ok) {
                 seqRef.current = Math.max(seqRef.current, ack.accepted_seq);
-                // Merge: server is authoritative for already-stored answers.
                 setAnswers((prev) => ({ ...prev, ...ack.answers }));
+                // Flush any pending answers after resync
+                flushPendingAnswers();
               }
             },
           );
         }
       });
-      s.on('disconnect', () => setConnected(false));
+      
+      s.on('connect_error', (err) => {
+        setConnected(false);
+        setError(`Connection lost: ${err.message}. Reconnecting...`);
+      });
+      
+      s.on('disconnect', (reason) => {
+        setConnected(false);
+        if (reason !== 'io client disconnect') {
+          setError('Disconnected from server. Reconnecting...');
+        }
+      });
+      
       s.on('exam:closed', () => {
         clearPersisted();
         setSubmitted(true);
       });
     })();
+    
     return () => {
       cancelled = true;
+      if (flushTimeoutRef.current) clearTimeout(flushTimeoutRef.current);
       s?.disconnect();
+      socketRef.current = null;
     };
-  }, [payload]);
+  }, [payload, flushPendingAnswers]);
 
-  // Tick clock every second.
+  // Tick clock every second
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
-  // Persist on every answer change.
+  // Persist on every answer change
   useEffect(() => {
     if (!payload) return;
     persist({
@@ -161,15 +232,15 @@ function ExamApp() {
   const remaining = payload
     ? Math.max(0, new Date(payload.deadline_at).getTime() - now)
     : 0;
-  const remainingStr = formatRemaining(remaining);
+  const isExpired = remaining === 0 && payload !== null;
 
   const orderedQuestions = useMemo(() => {
     if (!payload) return [];
-    if (!payload.exam.shuffle) {
-      return [...payload.exam.questions].sort((a, b) => a.ordinal - b.ordinal);
+    const questions = [...payload.exam.questions].sort((a, b) => a.ordinal - b.ordinal);
+    if (payload.exam.shuffle) {
+      return shuffleStable(questions, payload.session_id);
     }
-    // Stable shuffle: seeded by session_id so refresh gives same order.
-    return shuffleStable(payload.exam.questions, payload.session_id);
+    return questions;
   }, [payload]);
 
   const pickAnswer = useCallback(
@@ -177,9 +248,10 @@ function ExamApp() {
       seqRef.current += 1;
       const seq = seqRef.current;
       setAnswers((prev) => ({ ...prev, [questionId]: choiceId }));
+      
       const sock = socketRef.current;
       if (sock?.connected && payload) {
-        sock.timeout(2000).emit(
+        sock.timeout(3000).emit(
           'answer:upsert',
           {
             session_id: payload.session_id,
@@ -187,8 +259,28 @@ function ExamApp() {
             choice_id: choiceId,
             client_seq: seq,
           },
-          (_err: any, _ack: any) => undefined,
+          (err: any) => {
+            if (err) {
+              // Queue for later if failed
+              pendingAnswersRef.current.push({
+                question_id: questionId,
+                choice_id: choiceId,
+                client_seq: seq,
+                timestamp: Date.now(),
+              });
+              savePendingAnswers(pendingAnswersRef.current);
+            }
+          },
         );
+      } else if (payload) {
+        // Queue for when connection is restored
+        pendingAnswersRef.current.push({
+          question_id: questionId,
+          choice_id: choiceId,
+          client_seq: seq,
+          timestamp: Date.now(),
+        });
+        savePendingAnswers(pendingAnswersRef.current);
       }
     },
     [payload],
@@ -218,16 +310,52 @@ function ExamApp() {
     }
   }
 
+  // Auto-submit on expiry
+  useEffect(() => {
+    if (isExpired && !submitted && !isSubmitting && payload) {
+      submit();
+    }
+  }, [isExpired, submitted, isSubmitting, payload]);
+
+  if (error) {
+    return (
+      <div className="center">
+        <div className="card">
+          <h1>خطأ</h1>
+          <div className="error">{error}</div>
+          <button onClick={() => window.location.reload()} style={{ marginTop: 16 }}>
+            إعادة المحاولة
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (!payload) {
     return <div className="center"><div className="muted">في انتظار الاختبار...</div></div>;
   }
+  
   if (submitted) {
     return (
       <div className="center">
         <div className="card">
           <h1>تم تسليم الاختبار</h1>
-          {score != null && <div>الدرجة: {score}</div>}
-          <div className="muted">سيُغلق هذا النافذة تلقائياً.</div>
+          {score != null && <div style={{ fontSize: 24, marginTop: 16 }}>الدرجة: {score}</div>}
+          <div className="muted" style={{ marginTop: 16 }}>سيُغلق هذا النافذة تلقائياً.</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (orderedQuestions.length === 0) {
+    return (
+      <div className="center">
+        <div className="card">
+          <h1>خطأ في الاختبار</h1>
+          <div className="error">لا توجد أسئلة في هذا الاختبار.</div>
+          <button onClick={() => window.studentApi.closeExam()} style={{ marginTop: 16 }}>
+            إغلاق
+          </button>
         </div>
       </div>
     );
@@ -235,14 +363,15 @@ function ExamApp() {
 
   const q = orderedQuestions[current];
   const answeredCount = Object.keys(answers).length;
+  const progressPercent = (answeredCount / orderedQuestions.length) * 100;
 
   return (
     <div className="exam">
       <header>
         <strong>{payload.exam.title}</strong>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-          {!connected && <span className="connection-warn">انقطاع — يحاول الاتصال</span>}
-          <span>المتبقي: <strong>{remainingStr}</strong></span>
+          {!connected && <span className="connection-warn">⚠ انقطع الاتصال</span>}
+          <span>المتبقي: <strong>{formatRemaining(remaining)}</strong></span>
         </div>
       </header>
       <div className="stage">
@@ -262,6 +391,7 @@ function ExamApp() {
             ))}
           </div>
         </div>
+        
         <div className="q-pager">
           {orderedQuestions.map((qq, i) => (
             <button
@@ -275,9 +405,7 @@ function ExamApp() {
         </div>
       </div>
       <footer>
-        <span className="muted">
-          مُجاب: {answeredCount} / {orderedQuestions.length}
-        </span>
+        <span className="muted"></span>
         <div style={{ display: 'flex', gap: 8 }}>
           <button
             onClick={() => setCurrent((c) => Math.max(0, c - 1))}
@@ -300,9 +428,9 @@ function ExamApp() {
 
 function formatRemaining(ms: number): string {
   const total = Math.floor(ms / 1000);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function shuffleStable<T extends { id: string }>(items: T[], seedStr: string): T[] {
@@ -316,6 +444,7 @@ function shuffleStable<T extends { id: string }>(items: T[], seedStr: string): T
   }
   return arr;
 }
+
 function mulberry32(seed: number) {
   return function () {
     let t = (seed += 0x6d2b79f5);
