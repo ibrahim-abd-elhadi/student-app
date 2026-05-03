@@ -19,7 +19,7 @@ packages/
   designer-app/    Electron exam authoring tool
 infra/
   docker-compose.yml
-  db/init/         SQL files auto-loaded by Postgres on first boot
+  db/init/  
 ```
 
 ## Prerequisites
