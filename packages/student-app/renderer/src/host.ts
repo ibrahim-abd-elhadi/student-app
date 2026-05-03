@@ -36,6 +36,7 @@ export async function startHost() {
   console.log('[host] Connecting to WebSocket...');
 
   socket = io(session.base_url, {
+    path: '/ws',
     transports: ['websocket'],
     auth: { token },
     reconnection: true,

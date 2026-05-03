@@ -104,8 +104,8 @@ export class ApiClient {
     if (!s) throw new Error('no_session');
     if (this.socket?.connected) return this.socket;
 
-    // Important: no /ws in the URL
-    this.socket = io(`${this.baseUrl}`, {
+    this.socket = io(this.baseUrl, {
+      path: '/ws',
       transports: ['websocket'],
       auth: { token: s.access_token },
       reconnection: true,
