@@ -56,6 +56,7 @@ function ExamApp() {
   const [connected, setConnected] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [score, setScore] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const seqRef = useRef(0);
   const socketRef = useRef<Socket | null>(null);
 
@@ -83,16 +84,19 @@ function ExamApp() {
     return off;
   }, []);
 
-  // Build socket. We can't rely on the host window's socket because we live
-  // in a separate BrowserWindow; we open our own connection using the same
-  // session token. Both sockets co-exist for the same user.
+  // Build socket. Use consistent path pattern.
   useEffect(() => {
     let s: Socket;
     let cancelled = false;
     (async () => {
       const session = await window.studentApi.getSession();
-      if (!session || cancelled) return;
-      s = io(`${session.base_url}/ws`, {
+      if (!session || cancelled) {
+        setError('No session found. Please login again.');
+        return;
+      }
+      // Fix: Use path: '/ws' for consistency with host.ts
+      s = io(session.base_url, {
+        path: '/ws',
         transports: ['websocket'],
         auth: { token: session.access_token },
         reconnection: true,
@@ -102,6 +106,7 @@ function ExamApp() {
       socketRef.current = s;
       s.on('connect', async () => {
         setConnected(true);
+        setError(null);
         // Resync: fetch authoritative state and reconcile our seq.
         if (payload) {
           s.emit(
@@ -116,6 +121,10 @@ function ExamApp() {
             },
           );
         }
+      });
+      s.on('connect_error', (err) => {
+        setConnected(false);
+        setError(`Connection error: ${err.message}`);
       });
       s.on('disconnect', () => setConnected(false));
       s.on('exam:closed', () => {
@@ -193,9 +202,25 @@ function ExamApp() {
           clearPersisted();
           setSubmitted(true);
           setScore(ack.score ?? null);
-          setTimeout(() => window.studentApi.closeExam(), 8080);
+          setTimeout(() => window.studentApi.closeExam(), 3000);
+        } else {
+          setError(_err?.message || 'Submission failed');
         }
       });
+  }
+
+  if (error) {
+    return (
+      <div className="center">
+        <div className="card">
+          <h1>خطأ</h1>
+          <div className="error">{error}</div>
+          <button onClick={() => window.studentApi.closeExam()} style={{ marginTop: 16 }}>
+            إغلاق
+          </button>
+        </div>
+      </div>
+    );
   }
 
   if (!payload) {

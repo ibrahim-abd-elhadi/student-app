@@ -8,18 +8,36 @@ export function ReportView() {
   const setView = useApp((s) => s.setView);
   const [report, setReport] = useState<SessionReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [printError, setPrintError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
-    void api.getReport(session.id).then(setReport);
+    api.getReport(session.id).then(setReport).catch(console.error);
   }, [session]);
 
   async function print() {
     if (!session) return;
     setBusy(true);
+    setPrintError(null);
     try {
       const html = await api.getReportHtml(session.id);
-      await window.tutorApi.printReport(html);
+      if (window.tutorApi) {
+        await window.tutorApi.printReport(html);
+      } else {
+        // Fallback: create a print window
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(html);
+          printWindow.document.close();
+          printWindow.print();
+          printWindow.close();
+        } else {
+          throw new Error('Could not open print window');
+        }
+      }
+    } catch (err: any) {
+      setPrintError(err.message || 'Print failed');
+      console.error('Print error:', err);
     } finally {
       setBusy(false);
     }
@@ -37,6 +55,7 @@ export function ReportView() {
         <button onClick={print} disabled={busy}>طباعة</button>
         <button className="secondary" onClick={() => setView('dashboard')}>عودة</button>
       </div>
+      {printError && <div className="error" style={{ marginBottom: 16 }}>{printError}</div>}
       <table className="card">
         <thead>
           <tr>
