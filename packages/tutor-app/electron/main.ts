@@ -3,13 +3,17 @@ import * as path from 'path';
 
 const isDev = !app.isPackaged;
 
+function getPreloadPath() {
+  return path.join(__dirname, 'preload.js');
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 900,
     title: 'Tutor — لوحة التحكم',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: getPreloadPath(),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -32,8 +36,16 @@ function createWindow(): BrowserWindow {
 
 /** Print the report HTML to the system printer (or save as PDF). */
 ipcMain.handle('report:print', async (_evt, html: string) => {
-  const printWin = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+  const printWin = new BrowserWindow({ 
+    show: false, 
+    webPreferences: { 
+      sandbox: true,
+      contextIsolation: true,
+    } 
+  });
+  
   await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  
   return new Promise<void>((resolve, reject) => {
     printWin.webContents.print({ silent: false, printBackground: true }, (success, failureReason) => {
       printWin.destroy();
