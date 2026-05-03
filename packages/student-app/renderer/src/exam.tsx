@@ -193,7 +193,7 @@ function ExamApp() {
           clearPersisted();
           setSubmitted(true);
           setScore(ack.score ?? null);
-          setTimeout(() => window.studentApi.closeExam(), 3000);
+          setTimeout(() => window.studentApi.closeExam(), 8080);
         }
       });
   }

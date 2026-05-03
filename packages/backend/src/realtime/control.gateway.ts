@@ -5,15 +5,16 @@ import {
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
-  WebSocketServer,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
-import type { Server, Socket } from 'socket.io';
+import type { Socket } from 'socket.io';
 import { AuthService } from '../auth/auth.service';
 import { PresenceService } from './presence.service';
 import { SessionsService, StartedSession } from '../sessions/sessions.service';
 import { AttemptsService } from '../sessions/attempts.service';
 import type { JwtClaims, UserRole } from '@classroom/shared';
+import { SocketIoProvider } from './socket-io.provider';
+import type { Server as SocketIoServer } from 'socket.io';
 
 interface SocketUser extends JwtClaims {}
 
@@ -22,7 +23,6 @@ interface SocketUser extends JwtClaims {}
  * It manages student presence, tutor commands (lock/unlock), and exam progress synchronization.
  */
 @WebSocketGateway({
-  namespace: '/ws',
   cors: { origin: true, credentials: true },
   transports: ['websocket'],
   pingInterval: 5_000,
@@ -33,17 +33,18 @@ export class ControlGateway
 {
   private readonly log = new Logger('ControlGateway');
 
-  @WebSocketServer()
-  io!: Server;
-
   constructor(
     private readonly auth: AuthService,
     private readonly presence: PresenceService,
     private readonly sessionsService: SessionsService,
     private readonly attempts: AttemptsService,
+    private readonly ioProvider: SocketIoProvider,
   ) {}
 
-  /* ---------- Connection lifecycle ---------- */
+  // Getter that retrieves the server when needed (after startup)
+  private get io(): SocketIoServer {
+    return this.ioProvider.getIo();
+  }
 
   /**
    * Called when a new client connects.
@@ -162,7 +163,18 @@ export class ControlGateway
     return { ok: true, dispatched };
   }
 
-  /* ---------- Student → Server events ---------- */
+  @SubscribeMessage('student:ready')
+  handleStudentReady(@ConnectedSocket() socket: Socket) {
+    this.requireRole(socket, 'STUDENT');
+    const u = this.userOf(socket);
+    this.io.to(`classroom:${u.classroom_id}`).emit('presence:update', {
+      user_id: u.sub,
+      online: true,
+      ready: true,
+      last_seen_at: new Date().toISOString(),
+    });
+    return { ok: true };
+  }
 
   /**
    * Student reports a question answer.
@@ -294,7 +306,6 @@ export class ControlGateway
       reason,
       state: 'CLOSED',
     });
-    // Tell students this session is over (so they tear down the exam window).
     this.io.to(`classroom:${classroomId}`).emit('exam:closed', {
       session_id: sessionId,
       reason,

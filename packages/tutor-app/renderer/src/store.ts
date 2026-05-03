@@ -6,6 +6,7 @@ export interface RosterStudent {
   username: string;
   display_name: string;
   online: boolean;
+  ready?: boolean;
   last_seen_at: string | null;
   locked?: boolean;
   suspicious?: boolean;
@@ -23,30 +24,59 @@ interface AppState {
   exams: ExamSummary[];
   activeSession: SessionDto | null;
   activeExam: ExamSummary | null;
-  attempts: Record<string, AttemptDto>; // keyed by student_id
+  attempts: Record<string, AttemptDto>;
   totalQuestions: number;
 
   setView: (v: View) => void;
   setUser: (u: AppState['user']) => void;
   setRoster: (r: RosterStudent[]) => void;
+
   toggleStudent: (id: string) => void;
   clearSelection: () => void;
   selectAllOnline: () => void;
-  upsertPresence: (id: string, online: boolean, last_seen_at: string | null) => void;
-  upsertStudentState: (id: string, patch: Partial<RosterStudent>) => void;
+
+  upsertPresence: (
+    id: string,
+    online: boolean,
+    last_seen_at: string | null,
+    ready?: boolean
+  ) => void;
+
+  upsertStudentState: (
+    id: string,
+    patch: Partial<RosterStudent>
+  ) => void;
 
   setExams: (e: ExamSummary[]) => void;
-  startActive: (s: SessionDto, exam: ExamSummary, attempts: AttemptDto[], total: number) => void;
-  applyProgress: (student_id: string, answered_count: number) => void;
-  applySubmitted: (student_id: string, score: number | null, submitted_at: string) => void;
+
+  startActive: (
+    s: SessionDto,
+    exam: ExamSummary,
+    attempts: AttemptDto[],
+    total: number
+  ) => void;
+
+  applyProgress: (
+    student_id: string,
+    answered_count: number
+  ) => void;
+
+  applySubmitted: (
+    student_id: string,
+    score: number | null,
+    submitted_at: string
+  ) => void;
+
   closeActive: () => void;
 }
 
 export const useApp = create<AppState>((set, get) => ({
   view: 'login',
   user: null,
+
   roster: [],
   selectedStudentIds: new Set(),
+
   exams: [],
   activeSession: null,
   activeExam: null,
@@ -54,33 +84,72 @@ export const useApp = create<AppState>((set, get) => ({
   totalQuestions: 0,
 
   setView: (v) => set({ view: v }),
+
   setUser: (u) => set({ user: u }),
+
   setRoster: (r) => set({ roster: r }),
 
   toggleStudent: (id) => {
     const next = new Set(get().selectedStudentIds);
+
     if (next.has(id)) next.delete(id);
     else next.add(id);
+
     set({ selectedStudentIds: next });
   },
-  clearSelection: () => set({ selectedStudentIds: new Set() }),
+
+  clearSelection: () =>
+    set({ selectedStudentIds: new Set() }),
+
   selectAllOnline: () =>
     set({
       selectedStudentIds: new Set(
-        get().roster.filter((s) => s.online).map((s) => s.id),
+        get()
+          .roster
+          .filter((s) => s.online)
+          .map((s) => s.id)
       ),
     }),
 
-  upsertPresence: (id, online, last_seen_at) =>
-    set({
-      roster: get().roster.map((s) =>
-        s.id === id ? { ...s, online, last_seen_at } : s,
-      ),
-    }),
+  upsertPresence: (id, online, last_seen_at, ready?: boolean) => {
+    const roster = get().roster;
+    const found = roster.some((s) => s.id === id);
+
+    if (found) {
+      set({
+        roster: roster.map((s) =>
+          s.id === id
+            ? {
+                ...s,
+                online,
+                last_seen_at,
+                ready: online ? ready ?? s.ready : false,
+              }
+            : s
+        ),
+      });
+    } else {
+      set({
+        roster: [
+          ...roster,
+          {
+            id,
+            username: id,
+            display_name: id,
+            online,
+            ready: online ? ready ?? true : false,
+            last_seen_at,
+          },
+        ],
+      });
+    }
+  },
 
   upsertStudentState: (id, patch) =>
     set({
-      roster: get().roster.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      roster: get().roster.map((s) =>
+        s.id === id ? { ...s, ...patch } : s
+      ),
     }),
 
   setExams: (e) => set({ exams: e }),
@@ -89,26 +158,37 @@ export const useApp = create<AppState>((set, get) => ({
     set({
       activeSession: s,
       activeExam: exam,
-      attempts: Object.fromEntries(attempts.map((a) => [a.student_id, a])),
+      attempts: Object.fromEntries(
+        attempts.map((a) => [a.student_id, a])
+      ),
       totalQuestions: total,
       view: 'monitor',
     }),
 
   applyProgress: (student_id, answered_count) => {
     const next = { ...get().attempts };
+
     if (next[student_id]) {
       next[student_id] = {
         ...next[student_id],
         answered_count,
         state:
-          next[student_id].state === 'ASSIGNED' ? 'IN_PROGRESS' : next[student_id].state,
+          next[student_id].state === 'ASSIGNED'
+            ? 'IN_PROGRESS'
+            : next[student_id].state,
       };
     }
+
     set({ attempts: next });
   },
 
-  applySubmitted: (student_id, score, submitted_at) => {
+  applySubmitted: (
+    student_id,
+    score,
+    submitted_at
+  ) => {
     const next = { ...get().attempts };
+
     if (next[student_id]) {
       next[student_id] = {
         ...next[student_id],
@@ -117,14 +197,21 @@ export const useApp = create<AppState>((set, get) => ({
         state: 'SUBMITTED',
       };
     }
+
     set({ attempts: next });
   },
 
   closeActive: () => {
     const s = get().activeSession;
+
     if (!s) return;
+
     set({
-      activeSession: { ...s, state: 'CLOSED', closed_at: new Date().toISOString() },
+      activeSession: {
+        ...s,
+        state: 'CLOSED',
+        closed_at: new Date().toISOString(),
+      },
       view: 'report',
     });
   },

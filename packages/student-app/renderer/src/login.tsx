@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { login } from './api';
 import { startHost } from './host';
@@ -7,7 +7,7 @@ import './styles.css';
 const isHost = new URLSearchParams(location.search).get('mode') === 'host';
 
 function LoginCard() {
-  const [base, setBase] = useState('http://127.0.0.1:3000');
+  const [base, setBase] = useState('http://127.0.0.1:8080');
   const [username, setUsername] = useState('student1');
   const [password, setPassword] = useState('Password123!');
   const [busy, setBusy] = useState(false);
@@ -58,12 +58,7 @@ function LoginCard() {
         </div>
         <div className="row">
           <label>كلمة المرور</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
         {err && <div className="error" style={{ marginBottom: 8 }}>{err}</div>}
         <button type="submit" disabled={busy} style={{ width: '100%' }}>

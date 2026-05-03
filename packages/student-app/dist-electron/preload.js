@@ -17,6 +17,7 @@ electron_1.contextBridge.exposeInMainWorld('studentApi', {
     /* ================= EXAM ================= */
     openExam: (payload) => electron_1.ipcRenderer.invoke('exam:open', payload),
     closeExam: () => electron_1.ipcRenderer.invoke('exam:close'),
+    hostReady: () => electron_1.ipcRenderer.invoke('host:ready'),
     /* ================= EVENTS ================= */
     onExamStart: (cb) => {
         const handler = (_, p) => cb(p);

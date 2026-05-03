@@ -1,11 +1,16 @@
-import * as dotenv from 'dotenv';
-dotenv.config();
+import { existsSync } from 'node:fs';
+import { config as dotenvConfig } from 'dotenv';
+const envPath = existsSync('.env') ? '.env' : '.env.example';
+dotenvConfig({ path: envPath });
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, RequestMethod } from '@nestjs/common';
+import { IoAdapter } from '@nestjs/platform-socket.io';
+import { Server } from 'socket.io';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { config } from './config/configuration';
+import { SocketIoProvider } from './realtime/socket-io.provider';
 
 /**
  * Main entry point for the NestJS backend application.
@@ -18,6 +23,34 @@ async function bootstrap() {
     logger: ['log', 'error', 'warn', 'debug'],
   });
 
+  const httpServer = app.getHttpServer();
+
+  // Create the Socket.IO server manually
+  const io = new Server(httpServer, {
+    cors: { origin: true, credentials: true },
+    transports: ['websocket'],
+  });
+
+  // Set it into the shared provider so the gateway can use it
+  const ioProvider = app.get(SocketIoProvider);
+  ioProvider.setIo(io);
+
+  // Adapter that returns our pre‑made server
+  class CustomIoAdapter extends IoAdapter {
+    create(port: number, options?: any): Server {
+      return io;
+    }
+  }
+  app.useWebSocketAdapter(new CustomIoAdapter(app));
+
+  // Global prefix for REST routes, EXCLUDING Socket.IO paths
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: '/socket.io/(.*)', method: RequestMethod.ALL },
+      { path: '/ws', method: RequestMethod.ALL },
+    ],
+  });
+
   // Apply security middleware (HTTP headers)
   app.use(helmet());
 
@@ -26,10 +59,6 @@ async function bootstrap() {
     origin: config.corsOrigins.includes('*') ? true : config.corsOrigins,
     credentials: true,
   });
-
-  // Set global prefix for all API routes to version the API
-  app.setGlobalPrefix('api/v1');
-
   // Set up global validation pipes for DTOs
   app.useGlobalPipes(
     new ValidationPipe({

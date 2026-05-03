@@ -4,12 +4,16 @@
  *
  * Usage: npm -w @classroom/backend run db:seed
  */
-import 'dotenv/config';
 import 'reflect-metadata';
+import { existsSync } from 'node:fs';
+import { config as dotenvConfig } from 'dotenv';
 import { DataSource } from 'typeorm';
 import * as argon2 from 'argon2';
-import { config } from '../config/configuration';
 import { entities } from '../entities';
+
+const envPath = existsSync('.env') ? '.env' : '.env.example';
+dotenvConfig({ path: envPath });
+const { config } = require('../config/configuration');
 
 async function main() {
   const ds = new DataSource({
