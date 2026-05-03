@@ -23,4 +23,9 @@ export default defineConfig({
     strictPort: true,
     host: "localhost",
   },
+  resolve: {
+    alias: {
+      '@classroom/shared': path.resolve(__dirname, '../shared/src'),
+    },
+  },
 });

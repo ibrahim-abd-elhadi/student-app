@@ -15,4 +15,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  resolve: {
+    alias: {
+      '@classroom/shared': path.resolve(__dirname, '../shared/src'),
+    },
+  },
 });

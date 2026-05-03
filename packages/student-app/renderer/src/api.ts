@@ -1,25 +1,24 @@
 import axios from 'axios';
 import type { StudentAttemptSummary, StudentExamPayload } from '@classroom/shared';
 
-export async function login(baseUrl: string, username: string, password: string) {
-  const { data } = await axios.post(`${baseUrl}/api/v1/auth/login`, { username, password });
-  return data;
+const STORAGE_KEY = 'classroom.tutor.session';
+
+// Local type to avoid dependency issues
+interface StoredSession {
+  access_token: string;
+  refresh_token: string;
+  user: {
+    id: string;
+    username: string;
+    display_name: string;
+    role: string;
+    classroom_id: string;
+  };
 }
 
-export async function refreshToken(baseUrl: string, refresh_token: string) {
-  const { data } = await axios.post(`${baseUrl}/api/v1/auth/refresh`, { refresh_token });
-  return data;
-}
-
-export async function listMyAttempts(
-  baseUrl: string,
-  accessToken: string,
-): Promise<StudentAttemptSummary[]> {
-  const { data } = await axios.get(`${baseUrl}/api/v1/me/attempts`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  return data;
-}
+export class ApiClient {
+  private rest: AxiosInstance;
+  socket: Socket | null = null;
 
 export async function markOnline(baseUrl: string, accessToken: string) {
   const { data } = await axios.post(
@@ -68,8 +67,5 @@ export function decodeJwt(token: string): { exp?: number } | null {
         .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
         .join('')
     );
-    return JSON.parse(jsonPayload);
-  } catch {
-    return null;
   }
 }
